@@ -1,6 +1,5 @@
-Workers · JS
 import { kv } from '@vercel/kv';
- 
+
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     const workers = (await kv.get('workers')) || [];
@@ -12,4 +11,3 @@ export default async function handler(req, res) {
   }
   return res.status(405).end();
 }
- 
