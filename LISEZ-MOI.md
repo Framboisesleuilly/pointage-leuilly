@@ -1,6 +1,6 @@
 # Déployer l'appli Pointage sur Vercel — guide détaillé
 
-Aucune compétence en code n'est nécessaire. Compte 20-30 minutes la première fois. Prévois un ordinateur pour cette étape (plus simple qu'au téléphone).
+Aucune compétence en code n'est nécessaire. Compte 20-30 minutes la première fois. Prévois un ordinateur pour cette étape (plus simple qu'au téléphone) .
 
 ---
 
