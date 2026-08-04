@@ -135,6 +135,7 @@ function render(){
   if(state.screen==='workerDash') return renderWorkerDash();
   if(state.screen==='adminLogin') return renderAdminLogin();
   if(state.screen==='adminDash') return renderAdminDash();
+  if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
 }
 
 function renderHome(){
@@ -158,12 +159,14 @@ function renderWorkerLogin(){
     '<div class="card stack">' +
       '<div><label>Prénom</label><input type="text" id="fPrenom" placeholder="Ton prénom"></div>' +
       '<div><label>Date de naissance</label><input type="date" id="fDob"></div>' +
+      '<div><label>Email (pour ton récap hebdomadaire)</label><input type="text" id="fEmail" placeholder="toi@exemple.fr"></div>' +
       '<div id="loginErr" class="banner hidden"></div>' +
       '<button class="btn btn-primary" id="btnLogin">Se connecter</button>' +
     '</div>';
   document.getElementById('btnLogin').onclick = async function(){
     var prenom = document.getElementById('fPrenom').value.trim();
     var dob = document.getElementById('fDob').value;
+    var email = document.getElementById('fEmail').value.trim();
     var errEl = document.getElementById('loginErr');
     if(!prenom || !dob){
       errEl.textContent = 'Entre ton prénom et ta date de naissance.';
@@ -179,9 +182,13 @@ function renderWorkerLogin(){
         errEl.classList.remove('hidden');
         return;
       }
+      if(email && existing.email !== email){
+        existing.email = email;
+        await saveWorkers(workers);
+      }
       state.worker = existing;
     } else {
-      var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob };
+      var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob, email:email };
       workers.push(w);
       await saveWorkers(workers);
       state.worker = w;
@@ -223,7 +230,7 @@ async function renderWorkerDash(){
         '<div><label>Après-midi début</label><input type="time" id="aD" value="'+(current.apremDebut||'')+'"></div>' +
         '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"></div>' +
       '</div>' +
-      '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:45)+'"></div>' +
+      '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"></div>' +
       '<div class="total-line"><span>Total du jour</span><span class="val" id="liveTotal">—</span></div>' +
       '<button class="btn btn-gold" id="btnSave">Enregistrer</button>' +
       (isToday ? '' : '<button class="btn btn-ghost" id="btnCancelEdit">Annuler, revenir à aujourd\'hui</button>') +
@@ -237,6 +244,26 @@ async function renderWorkerDash(){
       var t = computeTotal(e);
       var edited = e.history && e.history.length > 0;
       html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
+    });
+    html += '</div>';
+  }
+
+  var monthTotals = {};
+  Object.keys(entries).forEach(function(d){
+    var t = computeTotal(entries[d]);
+    if(t){
+      var ym = d.slice(0,7);
+      monthTotals[ym] = round2((monthTotals[ym]||0) + t);
+    }
+  });
+  var months = Object.keys(monthTotals).sort().reverse();
+  if(months.length){
+    var moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+    html += '<div class="section-title">Récap mensuel</div><div class="card">';
+    months.forEach(function(ym){
+      var parts = ym.split('-');
+      var label = moisNoms[parseInt(parts[1],10)-1] + ' ' + parts[0];
+      html += '<div class="hist-item" style="cursor:default;"><span class="hist-date">'+label+'</span><span class="hist-total">'+monthTotals[ym]+' h</span></div>';
     });
     html += '</div>';
   }
@@ -259,7 +286,7 @@ async function renderWorkerDash(){
   });
   updateLive();
 
-  document.querySelectorAll('.hist-item').forEach(function(row){
+  document.querySelectorAll('.hist-item[data-date]').forEach(function(row){
     row.addEventListener('click', function(){
       state.editDate = row.getAttribute('data-date');
       renderWorkerDash();
@@ -351,7 +378,7 @@ async function renderAdminDash(){
       }
     });
     allData.push({worker:w, entries:entries, totalH: round2(totalH)});
-    totalsHtml += '<div class="worker-row"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalH)+' h</span></div>';
+    totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalH)+' h ›</span></div>';
   }
 
   if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; }
@@ -377,6 +404,125 @@ async function renderAdminDash(){
 
   document.getElementById('btnExport').onclick = function(){
     exportExcel(allData, mods);
+  };
+
+  document.querySelectorAll('.worker-row[data-wid]').forEach(function(row){
+    row.addEventListener('click', function(){
+      state.adminWorkerId = row.getAttribute('data-wid');
+      state.adminEditDate = null;
+      state.screen = 'adminWorkerDetail';
+      render();
+    });
+  });
+}
+
+async function renderAdminWorkerDetail(){
+  var workers = await getWorkers();
+  var w = workers.find(function(x){ return x.id === state.adminWorkerId; });
+  if(!w){ state.screen='adminDash'; return render(); }
+  headerTitle.textContent = w.prenom;
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var entries = await getEntries(w.id);
+  var editDate = state.adminEditDate || todayISO();
+  var current = entries[editDate] || {};
+  var wasEdited = current.history && current.history.length > 0;
+
+  var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';
+  html +=
+    '<div class="card stack">' +
+      '<label style="margin-bottom:0;font-size:14px;color:var(--ink-soft);">Modifier — ' + frDate(editDate) + (wasEdited ? ' (déjà modifié '+current.history.length+' fois)' : '') + '</label>' +
+      '<div><label>Choisir un jour</label><input type="date" id="adminDatePick" value="'+editDate+'"></div>' +
+      '<div class="grid2">' +
+        '<div><label>Matin début</label><input type="time" id="mD" value="'+(current.matinDebut||'')+'"></div>' +
+        '<div><label>Matin fin</label><input type="time" id="mF" value="'+(current.matinFin||'')+'"></div>' +
+      '</div>' +
+      '<div class="grid2">' +
+        '<div><label>Après-midi début</label><input type="time" id="aD" value="'+(current.apremDebut||'')+'"></div>' +
+        '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"></div>' +
+      '</div>' +
+      '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"></div>' +
+      '<div class="total-line"><span>Total du jour</span><span class="val" id="liveTotal">—</span></div>' +
+      '<button class="btn btn-gold" id="btnSave">Enregistrer la correction</button>' +
+    '</div>';
+
+  var allDates = Object.keys(entries).sort().reverse();
+  if(allDates.length){
+    html += '<div class="section-title">Tous les jours saisis — appuie pour modifier</div><div class="card">';
+    allDates.forEach(function(d){
+      var e = entries[d];
+      var t = computeTotal(e);
+      var edited = e.history && e.history.length > 0;
+      html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
+    });
+    html += '</div>';
+  }
+
+  app.innerHTML = html;
+
+  document.getElementById('btnBackAdmin').onclick = function(){
+    state.screen = 'adminDash';
+    render();
+  };
+
+  document.getElementById('adminDatePick').addEventListener('change', function(){
+    state.adminEditDate = this.value;
+    renderAdminWorkerDetail();
+  });
+
+  function updateLive(){
+    var e = {
+      matinDebut: document.getElementById('mD').value,
+      matinFin: document.getElementById('mF').value,
+      apremDebut: document.getElementById('aD').value,
+      apremFin: document.getElementById('aF').value,
+      pause: document.getElementById('pause').value
+    };
+    var t = computeTotal(e);
+    document.getElementById('liveTotal').textContent = t!==null ? t+' h' : '—';
+  }
+  ['mD','mF','aD','aF','pause'].forEach(function(id){
+    document.getElementById(id).addEventListener('input', updateLive);
+  });
+  updateLive();
+
+  document.querySelectorAll('.hist-item[data-date]').forEach(function(row){
+    row.addEventListener('click', function(){
+      state.adminEditDate = row.getAttribute('data-date');
+      renderAdminWorkerDetail();
+    });
+  });
+
+  document.getElementById('btnSave').onclick = async function(){
+    var e = {
+      matinDebut: document.getElementById('mD').value,
+      matinFin: document.getElementById('mF').value,
+      apremDebut: document.getElementById('aD').value,
+      apremFin: document.getElementById('aF').value,
+      pause: document.getElementById('pause').value
+    };
+    if(!e.matinDebut || !e.matinFin){
+      alert('Renseigne au moins l\'heure de début et de fin du matin.');
+      return;
+    }
+    var now = new Date().toISOString();
+    var existing = entries[editDate];
+    if(existing && (existing.matinDebut || existing.matinFin || existing.apremDebut || existing.apremFin)){
+      var hist = existing.history || [];
+      hist.push({
+        matinDebut: existing.matinDebut||'', matinFin: existing.matinFin||'',
+        apremDebut: existing.apremDebut||'', apremFin: existing.apremFin||'',
+        pause: existing.pause!==undefined?existing.pause:'', total: computeTotal(existing),
+        remplaceLe: now, modifiePar: 'Responsable'
+      });
+      e.history = hist;
+    } else if(existing && existing.history){
+      e.history = existing.history;
+    }
+    e.modifieLe = now;
+    e.modifiePar = 'Responsable';
+    entries[editDate] = e;
+    await saveEntries(w.id, entries);
+    renderAdminWorkerDetail();
   };
 }
 
@@ -411,7 +557,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, editDate:null }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, editDate:null, adminWorkerId:null, adminEditDate:null }; render(); };
 
 render();
 })();
