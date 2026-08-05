@@ -98,6 +98,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 (function(){
 
@@ -123,6 +124,39 @@ function fileToBase64(file){
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+if(window.pdfjsLib){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+async function extractPdfText(file){
+  try{
+    var buf = await file.arrayBuffer();
+    var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    var text = '';
+    for(var p=1; p<=pdf.numPages; p++){
+      var page = await pdf.getPage(p);
+      var content = await page.getTextContent();
+      text += content.items.map(function(it){ return it.str; }).join(' ') + ' ';
+    }
+    return text;
+  }catch(err){ return ''; }
+}
+function findWorkerInText(rawText, workers){
+  var norm = normalize(rawText);
+  for(var i=0;i<workers.length;i++){
+    var w = workers[i];
+    if(!w.key) continue;
+    var re = new RegExp('(^|[^a-z])'+w.key+'([^a-z]|$)', 'i');
+    if(re.test(norm)) return w;
+  }
+  return null;
+}
+function extractPeriodLabel(rawText){
+  var m = rawText.match(/[Dd]u\s+(\d{2})\/(\d{2})\/(\d{4})\s+au/);
+  if(!m) return null;
+  var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+  return moisNoms[parseInt(m[2],10)-1] + '-' + m[3];
 }
 
 var state = { screen:'home', worker:null, editDate:null, expandedMonth:null };
@@ -173,6 +207,7 @@ function render(){
   if(state.screen==='adminLogin') return renderAdminLogin();
   if(state.screen==='adminDash') return renderAdminDash();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
+  if(state.screen==='adminBulkImport') return renderAdminBulkImport();
 }
 
 btnMenu.onclick = function(){ navMenu.classList.toggle('hidden'); };
@@ -524,9 +559,15 @@ async function renderAdminDash(){
       totalsHtml +
     '</div>' +
     '<button class="btn btn-gold" id="btnExport">Exporter en Excel</button>' +
+    '<button class="btn btn-ghost" id="btnBulkImport">Importer des documents en masse</button>' +
     '<div class="link-row" id="btnResetInfo">Les identifiants sont : prénom + date de naissance donnés en début de saison.</div>' +
     '<div class="section-title">Journal des modifications</div>' +
     '<div class="card">' + modsHtml + '</div>';
+
+  document.getElementById('btnBulkImport').onclick = function(){
+    state.screen = 'adminBulkImport';
+    render();
+  };
 
   document.getElementById('btnExport').onclick = function(){
     exportExcel(allData, mods);
@@ -699,6 +740,94 @@ async function renderAdminWorkerDetail(){
     await saveEntries(w.id, entries);
     renderAdminWorkerDetail();
   };
+}
+
+async function renderAdminBulkImport(){
+  headerTitle.textContent = 'Import en masse';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+
+  var optionsHtml = '<option value="">— non trouvé, choisir —</option>' +
+    workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
+
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackBulk">‹ Retour à l\'équipe</button>' +
+    '<div class="card stack">' +
+      '<div><label>Sélectionner les fichiers (plusieurs à la fois)</label><input type="file" id="bulkFiles" multiple></div>' +
+      '<p class="muted">Astuce : nomme les fichiers avec le prénom du salarié (ex: Bulletin_Marie_Juillet.pdf) pour une reconnaissance automatique.</p>' +
+    '</div>' +
+    '<div id="bulkList"></div>';
+
+  document.getElementById('btnBackBulk').onclick = function(){ state.screen='adminDash'; render(); };
+
+  document.getElementById('bulkFiles').addEventListener('change', async function(e){
+    var files = Array.from(e.target.files);
+    document.getElementById('bulkList').innerHTML = '<p class="muted">Analyse des fichiers en cours…</p>';
+
+    var detections = [];
+    for(var i=0;i<files.length;i++){
+      var file = files[i];
+      var match = null;
+      var periodLabel = null;
+      if(file.type === 'application/pdf' && window.pdfjsLib){
+        var text = await extractPdfText(file);
+        if(text){
+          match = findWorkerInText(text, workers);
+          periodLabel = extractPeriodLabel(text);
+        }
+      }
+      if(!match){
+        var nameNorm = normalize(file.name);
+        match = workers.find(function(w){ return w.key && nameNorm.indexOf(w.key) !== -1; });
+      }
+      detections.push({ file: file, match: match, periodLabel: periodLabel });
+    }
+
+    var rowsHtml = detections.map(function(d, i){
+      var opts = optionsHtml.replace('value="'+(d.match?d.match.id:'__none__')+'"', 'value="'+(d.match?d.match.id:'')+'" selected');
+      return '<div class="doc-item" style="align-items:center;">' +
+        '<span style="flex:1;">'+d.file.name+(d.match?' <span class="muted">→ '+d.match.prenom+'</span>':'')+'</span>' +
+        '<select data-fileidx="'+i+'" style="max-width:140px;padding:8px;border-radius:8px;border:1px solid var(--line);">' +
+          opts +
+        '</select>' +
+      '</div>';
+    }).join('');
+
+    document.getElementById('bulkList').innerHTML =
+      '<div class="card">' + rowsHtml + '</div>' +
+      '<button class="btn btn-gold" id="btnDoImport">Importer '+files.length+' document(s)</button>' +
+      '<div id="bulkResult" class="muted" style="text-align:center;margin-top:8px;"></div>';
+
+    document.getElementById('btnDoImport').onclick = async function(){
+      var selects = document.querySelectorAll('select[data-fileidx]');
+      var byWorker = {};
+      var skipped = 0;
+      for(var i=0;i<selects.length;i++){
+        var wid = selects[i].value;
+        var d = detections[i];
+        if(!wid){ skipped++; continue; }
+        if(!byWorker[wid]) byWorker[wid] = [];
+        byWorker[wid].push(d);
+      }
+      var resultEl = document.getElementById('bulkResult');
+      resultEl.textContent = 'Import en cours…';
+      var count = 0;
+      for(var wid in byWorker){
+        var current = await getDocuments(wid);
+        var worker = workers.find(function(w){ return w.id === wid; });
+        for(var j=0;j<byWorker[wid].length;j++){
+          var d = byWorker[wid][j];
+          var base64 = await fileToBase64(d.file);
+          var ext = d.file.name.split('.').pop();
+          var niceName = worker ? 'Bulletin_'+worker.prenom+(d.periodLabel?'_'+d.periodLabel:'')+'.'+ext : d.file.name;
+          current.push({ id: 'doc-'+Date.now()+'-'+j, name: niceName, type: d.file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString() });
+          count++;
+        }
+        await saveDocuments(wid, current);
+      }
+      resultEl.textContent = count + ' document(s) importé(s)' + (skipped ? ', ' + skipped + ' ignoré(s) (pas de salarié choisi)' : '') + '.';
+    };
+  });
 }
 
 function exportExcel(allData, mods){
