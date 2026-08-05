@@ -69,6 +69,11 @@
   .home-btn .t{font-size:17px;font-weight:700;color:var(--moss);}
   .home-btn .s{font-size:13px;color:var(--ink-soft);margin-top:2px;}
   .hidden{display:none !important;}
+  .nav-menu{position:absolute;top:64px;right:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.15);overflow:hidden;z-index:50;min-width:180px;}
+  .nav-menu button{display:block;width:100%;text-align:left;padding:14px 16px;border:none;background:none;font-size:15px;font-weight:600;color:var(--ink);cursor:pointer;border-bottom:1px solid var(--line);}
+  .nav-menu button:last-child{border-bottom:none;}
+  .doc-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);}
+  .doc-item:last-child{border-bottom:none;}
 </style>
 </head>
 <body>
@@ -79,9 +84,16 @@
         <p class="brand">Mont de Leuilly</p>
         <h1 id="headerTitle">Pointage</h1>
       </div>
+      <button class="btn-quit hidden" id="btnMenu" style="margin-right:8px;">☰</button>
       <button class="btn-quit hidden" id="btnQuit">Quitter</button>
     </div>
   </header>
+  <div id="navMenu" class="hidden nav-menu">
+    <button data-go="workerDash">Pointages</button>
+    <button data-go="workerRapport">Rapport</button>
+    <button data-go="workerDocs">Documents</button>
+    <button data-go="workerParams">Paramètres</button>
+  </div>
   <main id="app"></main>
 </div>
 
@@ -92,9 +104,28 @@
 var app = document.getElementById('app');
 var headerTitle = document.getElementById('headerTitle');
 var btnQuit = document.getElementById('btnQuit');
+var btnMenu = document.getElementById('btnMenu');
+var navMenu = document.getElementById('navMenu');
 var ADMIN_CODE = "LEUILLY2026";
 
-var state = { screen:'home', worker:null, editDate:null };
+var WORKER_SCREENS = ['workerDash','workerRapport','workerDocs','workerParams'];
+
+async function getDocuments(workerId){
+  try{ var r = await fetch('/api/documents?workerId='+encodeURIComponent(workerId)); return r.ok ? await r.json() : []; }catch(err){ return []; }
+}
+async function saveDocuments(workerId, docs){
+  await fetch('/api/documents?workerId='+encodeURIComponent(workerId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(docs)});
+}
+function fileToBase64(file){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload = function(){ resolve(reader.result.split(',')[1]); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+var state = { screen:'home', worker:null, editDate:null, expandedMonth:null };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -130,13 +161,29 @@ function normalize(s){
 
 function render(){
   btnQuit.classList.toggle('hidden', state.screen==='home');
+  var showMenu = WORKER_SCREENS.indexOf(state.screen) !== -1;
+  btnMenu.classList.toggle('hidden', !showMenu);
+  navMenu.classList.add('hidden');
   if(state.screen==='home') return renderHome();
   if(state.screen==='workerLogin') return renderWorkerLogin();
   if(state.screen==='workerDash') return renderWorkerDash();
+  if(state.screen==='workerRapport') return renderWorkerRapport();
+  if(state.screen==='workerDocs') return renderWorkerDocs();
+  if(state.screen==='workerParams') return renderWorkerParams();
   if(state.screen==='adminLogin') return renderAdminLogin();
   if(state.screen==='adminDash') return renderAdminDash();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
 }
+
+btnMenu.onclick = function(){ navMenu.classList.toggle('hidden'); };
+navMenu.querySelectorAll('button[data-go]').forEach(function(btn){
+  btn.onclick = function(){
+    state.screen = btn.getAttribute('data-go');
+    state.editDate = null;
+    navMenu.classList.add('hidden');
+    render();
+  };
+});
 
 function renderHome(){
   headerTitle.textContent = 'Pointage';
@@ -248,26 +295,6 @@ async function renderWorkerDash(){
     html += '</div>';
   }
 
-  var monthTotals = {};
-  Object.keys(entries).forEach(function(d){
-    var t = computeTotal(entries[d]);
-    if(t){
-      var ym = d.slice(0,7);
-      monthTotals[ym] = round2((monthTotals[ym]||0) + t);
-    }
-  });
-  var months = Object.keys(monthTotals).sort().reverse();
-  if(months.length){
-    var moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
-    html += '<div class="section-title">Récap mensuel</div><div class="card">';
-    months.forEach(function(ym){
-      var parts = ym.split('-');
-      var label = moisNoms[parseInt(parts[1],10)-1] + ' ' + parts[0];
-      html += '<div class="hist-item" style="cursor:default;"><span class="hist-date">'+label+'</span><span class="hist-total">'+monthTotals[ym]+' h</span></div>';
-    });
-    html += '</div>';
-  }
-
   app.innerHTML = html;
 
   function updateLive(){
@@ -329,6 +356,105 @@ async function renderWorkerDash(){
     await saveEntries(state.worker.id, entries);
     state.editDate = null;
     renderWorkerDash();
+  };
+}
+
+async function renderWorkerRapport(){
+  headerTitle.textContent = 'Rapport';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var entries = await getEntries(state.worker.id);
+
+  var monthTotals = {};
+  Object.keys(entries).forEach(function(d){
+    var t = computeTotal(entries[d]);
+    if(t){
+      var ym = d.slice(0,7);
+      monthTotals[ym] = round2((monthTotals[ym]||0) + t);
+    }
+  });
+  var months = Object.keys(monthTotals).sort().reverse();
+  var html = '';
+  if(!months.length){
+    html = '<p class="muted">Aucune heure enregistrée pour l\'instant.</p>';
+  } else {
+    var moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+    html += '<div class="card">';
+    months.forEach(function(ym){
+      var parts = ym.split('-');
+      var label = moisNoms[parseInt(parts[1],10)-1] + ' ' + parts[0];
+      var isOpen = state.expandedMonth === ym;
+      html += '<div class="hist-item" data-month="'+ym+'" style="cursor:pointer;"><span class="hist-date">'+label+'</span><span class="hist-total">'+monthTotals[ym]+' h &nbsp;'+(isOpen?'−':'+')+'</span></div>';
+      if(isOpen){
+        var daysInMonth = Object.keys(entries).filter(function(d){return d.slice(0,7)===ym;}).sort().reverse();
+        html += '<div style="padding:4px 0 8px 10px;">';
+        daysInMonth.forEach(function(d){
+          var t = computeTotal(entries[d]);
+          html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;padding:8px 0;"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' ✎</span></div>';
+        });
+        html += '</div>';
+      }
+    });
+    html += '</div>';
+  }
+  app.innerHTML = html;
+
+  document.querySelectorAll('.hist-item[data-month]').forEach(function(row){
+    row.addEventListener('click', function(){
+      var ym = row.getAttribute('data-month');
+      state.expandedMonth = (state.expandedMonth === ym) ? null : ym;
+      renderWorkerRapport();
+    });
+  });
+  document.querySelectorAll('.hist-item[data-date]').forEach(function(row){
+    row.addEventListener('click', function(){
+      state.editDate = row.getAttribute('data-date');
+      state.screen = 'workerDash';
+      render();
+    });
+  });
+}
+
+async function renderWorkerDocs(){
+  headerTitle.textContent = 'Documents';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var docs = await getDocuments(state.worker.id);
+  docs = docs.slice().sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); });
+
+  var html = '';
+  if(!docs.length){
+    html = '<p class="muted">Aucun document disponible pour l\'instant.</p>';
+  } else {
+    html += '<div class="card">';
+    docs.forEach(function(d){
+      var dateStr = d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString('fr-FR') : '';
+      html += '<div class="doc-item"><span>'+d.name+'<br><span class="muted">'+dateStr+'</span></span><a class="btn btn-ghost" style="width:auto;padding:8px 14px;" download="'+d.name+'" href="data:'+d.type+';base64,'+d.data+'">Télécharger</a></div>';
+    });
+    html += '</div>';
+  }
+  app.innerHTML = html;
+}
+
+function renderWorkerParams(){
+  headerTitle.textContent = 'Paramètres';
+  app.innerHTML =
+    '<div class="card stack">' +
+      '<div><label>Prénom</label><input type="text" id="pPrenom" value="'+state.worker.prenom+'" disabled></div>' +
+      '<div><label>Email pour le récap hebdomadaire</label><input type="text" id="pEmail" value="'+(state.worker.email||'')+'"></div>' +
+      '<div id="paramsMsg" class="banner ok hidden">Email mis à jour.</div>' +
+      '<button class="btn btn-primary" id="btnSaveEmail">Enregistrer</button>' +
+      '<button class="btn btn-ghost" id="btnLogoutParams">Se déconnecter</button>' +
+    '</div>';
+  document.getElementById('btnSaveEmail').onclick = async function(){
+    var email = document.getElementById('pEmail').value.trim();
+    var workers = await getWorkers();
+    var w = workers.find(function(x){ return x.id === state.worker.id; });
+    if(w){ w.email = email; await saveWorkers(workers); state.worker = w; }
+    var msg = document.getElementById('paramsMsg');
+    msg.classList.remove('hidden');
+  };
+  document.getElementById('btnLogoutParams').onclick = function(){
+    state = { screen:'home', worker:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null };
+    render();
   };
 }
 
@@ -427,8 +553,7 @@ async function renderAdminWorkerDetail(){
   var current = entries[editDate] || {};
   var wasEdited = current.history && current.history.length > 0;
 
-  var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';
-  html +=
+  var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';  html +=
     '<div class="card stack">' +
       '<label style="margin-bottom:0;font-size:14px;color:var(--ink-soft);">Modifier — ' + frDate(editDate) + (wasEdited ? ' (déjà modifié '+current.history.length+' fois)' : '') + '</label>' +
       '<div><label>Choisir un jour</label><input type="date" id="adminDatePick" value="'+editDate+'"></div>' +
@@ -457,7 +582,57 @@ async function renderAdminWorkerDetail(){
     html += '</div>';
   }
 
+  html += '<button class="btn" id="btnDeleteWorker" style="background:var(--red);color:#fff;margin-top:8px;">Supprimer ce salarié</button>';
+
   app.innerHTML = html;
+
+  var docs = await getDocuments(w.id);
+  var docsHtml = '<div class="section-title">Documents (feuilles de paie, etc.)</div><div class="card stack">';
+  docsHtml += '<div><label>Ajouter un document</label><input type="file" id="docFile"></div>';
+  docsHtml += '<button class="btn btn-primary" id="btnUploadDoc">Ajouter</button>';
+  if(docs.length){
+    docsHtml += '<div style="margin-top:10px;">';
+    docs.slice().sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); }).forEach(function(d){
+      var dateStr = d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString('fr-FR') : '';
+      docsHtml += '<div class="doc-item"><span>'+d.name+'<br><span class="muted">'+dateStr+'</span></span><button class="btn btn-ghost" style="width:auto;padding:8px 14px;color:var(--red);" data-delid="'+d.id+'">Supprimer</button></div>';
+    });
+    docsHtml += '</div>';
+  } else {
+    docsHtml += '<p class="muted" style="margin-top:6px;">Aucun document pour ce salarié.</p>';
+  }
+  docsHtml += '</div>';
+  app.insertAdjacentHTML('beforeend', docsHtml);
+
+  document.getElementById('btnUploadDoc').onclick = async function(){
+    var fileInput = document.getElementById('docFile');
+    var file = fileInput.files[0];
+    if(!file){ alert('Choisis un fichier d\'abord.'); return; }
+    var base64 = await fileToBase64(file);
+    var current = await getDocuments(w.id);
+    current.push({ id: 'doc-'+Date.now(), name: file.name, type: file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString() });
+    await saveDocuments(w.id, current);
+    renderAdminWorkerDetail();
+  };
+  document.querySelectorAll('button[data-delid]').forEach(function(btn){
+    btn.onclick = async function(){
+      var id = btn.getAttribute('data-delid');
+      var current = await getDocuments(w.id);
+      current = current.filter(function(d){ return d.id !== id; });
+      await saveDocuments(w.id, current);
+      renderAdminWorkerDetail();
+    };
+  });
+
+  document.getElementById('btnDeleteWorker').onclick = async function(){
+    var sure = confirm('Supprimer définitivement '+w.prenom+' et toutes ses heures enregistrées ? Cette action est irréversible.');
+    if(!sure) return;
+    var updated = workers.filter(function(x){ return x.id !== w.id; });
+    await saveWorkers(updated);
+    await saveEntries(w.id, {});
+    await saveDocuments(w.id, []);
+    state.screen = 'adminDash';
+    render();
+  };
 
   document.getElementById('btnBackAdmin').onclick = function(){
     state.screen = 'adminDash';
