@@ -117,6 +117,12 @@ async function getDocuments(workerId){
 async function saveDocuments(workerId, docs){
   await fetch('/api/documents?workerId='+encodeURIComponent(workerId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(docs)});
 }
+async function getValidations(workerId){
+  try{ var r = await fetch('/api/validations?workerId='+encodeURIComponent(workerId)); return r.ok ? await r.json() : {}; }catch(err){ return {}; }
+}
+async function saveValidations(workerId, validations){
+  await fetch('/api/validations?workerId='+encodeURIComponent(workerId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(validations)});
+}
 function fileToBase64(file){
   return new Promise(function(resolve, reject){
     var reader = new FileReader();
@@ -253,6 +259,7 @@ function renderWorkerLogin(){
       '<div><label>Prénom</label><input type="text" id="fPrenom" placeholder="Ton prénom"></div>' +
       '<div><label>Date de naissance</label><input type="date" id="fDob"></div>' +
       '<div><label>Email (pour ton récap hebdomadaire)</label><input type="text" id="fEmail" placeholder="toi@exemple.fr"></div>' +
+      '<div><label>Téléphone (pour le rappel SMS si oubli)</label><input type="text" id="fPhone" placeholder="0612345678"></div>' +
       '<div id="loginErr" class="banner hidden"></div>' +
       '<button class="btn btn-primary" id="btnLogin">Se connecter</button>' +
     '</div>';
@@ -260,6 +267,7 @@ function renderWorkerLogin(){
     var prenom = document.getElementById('fPrenom').value.trim();
     var dob = document.getElementById('fDob').value;
     var email = document.getElementById('fEmail').value.trim();
+    var phone = document.getElementById('fPhone').value.trim();
     var errEl = document.getElementById('loginErr');
     if(!prenom || !dob){
       errEl.textContent = 'Entre ton prénom et ta date de naissance.';
@@ -275,13 +283,13 @@ function renderWorkerLogin(){
         errEl.classList.remove('hidden');
         return;
       }
-      if(email && existing.email !== email){
-        existing.email = email;
-        await saveWorkers(workers);
-      }
+      var changed = false;
+      if(email && existing.email !== email){ existing.email = email; changed = true; }
+      if(phone && existing.phone !== phone){ existing.phone = phone; changed = true; }
+      if(changed) await saveWorkers(workers);
       state.worker = existing;
     } else {
-      var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob, email:email };
+      var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob, email:email, phone:phone };
       workers.push(w);
       await saveWorkers(workers);
       state.worker = w;
@@ -296,15 +304,19 @@ async function renderWorkerDash(){
   headerTitle.textContent = state.worker.prenom;
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var entries = await getEntries(state.worker.id);
+  var validations = await getValidations(state.worker.id);
   var today = todayISO();
   var editDate = state.editDate || today;
   var isToday = editDate === today;
+  var lockedMonth = validations[editDate.slice(0,7)] || null;
   var current = entries[editDate] || {};
   var alreadyFilled = current.matinDebut && current.matinFin;
   var wasEdited = current.history && current.history.length > 0;
 
   var html = '';
-  if(isToday && !alreadyFilled){
+  if(lockedMonth){
+    html += '<div class="banner">Ce mois a été validé et signé le '+new Date(lockedMonth.validatedAt).toLocaleDateString('fr-FR')+'. Contacte le responsable pour toute correction.</div>';
+  } else if(isToday && !alreadyFilled){
     html += '<div class="banner">N\'oublie pas de remplir tes heures aujourd\'hui !</div>';
   } else if(isToday){
     html += '<div class="banner ok">Heures du jour enregistrées.</div>';
@@ -312,21 +324,22 @@ async function renderWorkerDash(){
     html += '<div class="banner ok">Modification du ' + frDate(editDate) + (wasEdited ? ' — déjà modifié '+current.history.length+' fois' : '') + '.</div>';
   }
 
+  var dis = lockedMonth ? ' disabled' : '';
   html +=
     '<div class="card stack">' +
       '<label style="margin-bottom:0;font-size:14px;color:var(--ink-soft);">' + (isToday ? 'Aujourd\'hui — ' : 'Modifier — ') + frDate(editDate) + '</label>' +
       '<div><label>Ou choisir un autre jour</label><input type="date" id="freeDatePick" value="'+editDate+'" max="'+today+'"></div>' +
       '<div class="grid2">' +
-        '<div><label>Matin début</label><input type="time" id="mD" value="'+(current.matinDebut||(isToday?'06:00':''))+'"></div>' +
-        '<div><label>Matin fin</label><input type="time" id="mF" value="'+(current.matinFin||'')+'"></div>' +
+        '<div><label>Matin début</label><input type="time" id="mD" value="'+(current.matinDebut||(isToday?'06:00':''))+'"'+dis+'></div>' +
+        '<div><label>Matin fin</label><input type="time" id="mF" value="'+(current.matinFin||'')+'"'+dis+'></div>' +
       '</div>' +
       '<div class="grid2">' +
-        '<div><label>Après-midi début</label><input type="time" id="aD" value="'+(current.apremDebut||'')+'"></div>' +
-        '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"></div>' +
+        '<div><label>Après-midi début</label><input type="time" id="aD" value="'+(current.apremDebut||'')+'"'+dis+'></div>' +
+        '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"'+dis+'></div>' +
       '</div>' +
-      '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"></div>' +
+      '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"'+dis+'></div>' +
       '<div class="total-line"><span>Total du jour</span><span class="val" id="liveTotal">—</span></div>' +
-      '<button class="btn btn-gold" id="btnSave">Enregistrer</button>' +
+      (lockedMonth ? '' : '<button class="btn btn-gold" id="btnSave">Enregistrer</button>') +
       (isToday ? '' : '<button class="btn btn-ghost" id="btnCancelEdit">Annuler, revenir à aujourd\'hui</button>') +
     '</div>';
 
@@ -337,7 +350,12 @@ async function renderWorkerDash(){
       var e = entries[d];
       var t = computeTotal(e);
       var edited = e.history && e.history.length > 0;
-      html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
+      var isLocked = !!validations[d.slice(0,7)];
+      if(isLocked){
+        html += '<div class="hist-item"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' 🔒</span></div>';
+      } else {
+        html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
+      }
     });
     html += '</div>';
   }
@@ -377,7 +395,8 @@ async function renderWorkerDash(){
     cancelBtn.onclick = function(){ state.editDate = null; renderWorkerDash(); };
   }
 
-  document.getElementById('btnSave').onclick = async function(){
+  var btnSaveEl = document.getElementById('btnSave');
+  if(btnSaveEl) btnSaveEl.onclick = async function(){
     var e = {
       matinDebut: document.getElementById('mD').value,
       matinFin: document.getElementById('mF').value,
@@ -416,6 +435,9 @@ async function renderWorkerRapport(){
   headerTitle.textContent = 'Rapport';
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var entries = await getEntries(state.worker.id);
+  var validations = await getValidations(state.worker.id);
+  var today = todayISO();
+  var currentYm = today.slice(0,7);
 
   var monthTotals = {};
   Object.keys(entries).forEach(function(d){
@@ -436,15 +458,27 @@ async function renderWorkerRapport(){
       var parts = ym.split('-');
       var label = moisNoms[parseInt(parts[1],10)-1] + ' ' + parts[0];
       var isOpen = state.expandedMonth === ym;
-      html += '<div class="hist-item" data-month="'+ym+'" style="cursor:pointer;"><span class="hist-date">'+label+'</span><span class="hist-total">'+monthTotals[ym]+' h &nbsp;'+(isOpen?'−':'+')+'</span></div>';
+      var v = validations[ym];
+      html += '<div class="hist-item" data-month="'+ym+'" style="cursor:pointer;"><span class="hist-date">'+label+(v?' 🔒':'')+'</span><span class="hist-total">'+monthTotals[ym]+' h &nbsp;'+(isOpen?'−':'+')+'</span></div>';
       if(isOpen){
         var daysInMonth = Object.keys(entries).filter(function(d){return d.slice(0,7)===ym;}).sort().reverse();
         html += '<div style="padding:4px 0 8px 10px;">';
         daysInMonth.forEach(function(d){
           var t = computeTotal(entries[d]);
-          html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;padding:8px 0;"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' ✎</span></div>';
+          if(v){
+            html += '<div class="hist-item" style="padding:8px 0;"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' 🔒</span></div>';
+          } else {
+            html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;padding:8px 0;"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' ✎</span></div>';
+          }
         });
         html += '</div>';
+        if(v){
+          html += '<div style="padding:10px;background:var(--green-bg);border-radius:9px;margin:0 0 10px;font-size:13px;color:var(--moss-dark);">✓ Mois validé par '+v.prenom+' le '+new Date(v.validatedAt).toLocaleString('fr-FR')+' — '+v.totalHeures+' h.</div>';
+        } else if(ym !== currentYm){
+          html += '<div style="padding:0 0 10px;"><button class="btn btn-gold" data-validate="'+ym+'">Valider et signer ce mois ('+monthTotals[ym]+' h)</button></div>';
+        } else {
+          html += '<div style="padding:0 0 10px;"><p class="muted">Le mois en cours ne peut être validé qu\'une fois terminé.</p></div>';
+        }
       }
     });
     html += '</div>';
@@ -464,6 +498,25 @@ async function renderWorkerRapport(){
       state.screen = 'workerDash';
       render();
     });
+  });
+  document.querySelectorAll('button[data-validate]').forEach(function(btn){
+    btn.onclick = async function(){
+      var ym = btn.getAttribute('data-validate');
+      var parts = ym.split('-');
+      var moisNoms2 = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+      var label = moisNoms2[parseInt(parts[1],10)-1] + ' ' + parts[0];
+      var saisie = prompt('Pour valider et signer '+label+' ('+monthTotals[ym]+' h), tape ton prénom exact ci-dessous :');
+      if(!saisie) return;
+      if(normalize(saisie) !== normalize(state.worker.prenom)){
+        alert('Le prénom ne correspond pas, validation annulée.');
+        return;
+      }
+      var current = await getValidations(state.worker.id);
+      current[ym] = { validatedAt: new Date().toISOString(), prenom: state.worker.prenom, totalHeures: monthTotals[ym] };
+      await saveValidations(state.worker.id, current);
+      alert('Mois validé et signé.');
+      renderWorkerRapport();
+    };
   });
 }
 
@@ -493,15 +546,17 @@ function renderWorkerParams(){
     '<div class="card stack">' +
       '<div><label>Prénom</label><input type="text" id="pPrenom" value="'+state.worker.prenom+'" disabled></div>' +
       '<div><label>Email pour le récap hebdomadaire</label><input type="text" id="pEmail" value="'+(state.worker.email||'')+'"></div>' +
-      '<div id="paramsMsg" class="banner ok hidden">Email mis à jour.</div>' +
+      '<div><label>Téléphone pour le rappel SMS</label><input type="text" id="pPhone" value="'+(state.worker.phone||'')+'"></div>' +
+      '<div id="paramsMsg" class="banner ok hidden">Informations mises à jour.</div>' +
       '<button class="btn btn-primary" id="btnSaveEmail">Enregistrer</button>' +
       '<button class="btn btn-ghost" id="btnLogoutParams">Se déconnecter</button>' +
     '</div>';
   document.getElementById('btnSaveEmail').onclick = async function(){
     var email = document.getElementById('pEmail').value.trim();
+    var phone = document.getElementById('pPhone').value.trim();
     var workers = await getWorkers();
     var w = workers.find(function(x){ return x.id === state.worker.id; });
-    if(w){ w.email = email; await saveWorkers(workers); state.worker = w; }
+    if(w){ w.email = email; w.phone = phone; await saveWorkers(workers); state.worker = w; }
     var msg = document.getElementById('paramsMsg');
     msg.classList.remove('hidden');
   };
@@ -650,11 +705,17 @@ async function renderAdminWorkerDetail(){
   headerTitle.textContent = w.prenom;
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var entries = await getEntries(w.id);
+  var validations = await getValidations(w.id);
   var editDate = state.adminEditDate || todayISO();
   var current = entries[editDate] || {};
   var wasEdited = current.history && current.history.length > 0;
+  var lockedMonth = validations[editDate.slice(0,7)] || null;
 
-  var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';  html +=
+  var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';
+  if(lockedMonth){
+    html += '<div class="banner">Attention : ce mois a été validé et signé par '+lockedMonth.prenom+' le '+new Date(lockedMonth.validatedAt).toLocaleDateString('fr-FR')+'. Toute correction restera tracée dans l\'historique.</div>';
+  }
+  html +=
     '<div class="card stack">' +
       '<label style="margin-bottom:0;font-size:14px;color:var(--ink-soft);">Modifier — ' + frDate(editDate) + (wasEdited ? ' (déjà modifié '+current.history.length+' fois)' : '') + '</label>' +
       '<div><label>Choisir un jour</label><input type="date" id="adminDatePick" value="'+editDate+'"></div>' +
