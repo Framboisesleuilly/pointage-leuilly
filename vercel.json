@@ -2,7 +2,11 @@
   "crons": [
     {
       "path": "/api/send-weekly-emails",
-      "schedule": "0 6 * * 1"
+      "schedule": "0 12 * * 6"
+    },
+    {
+      "path": "/api/send-admin-daily-report",
+      "schedule": "0 18 * * *"
     }
   ]
 }
