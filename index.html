@@ -406,6 +406,7 @@ async function renderWorkerDash(){
     e.modifieLe = now;
     entries[editDate] = e;
     await saveEntries(state.worker.id, entries);
+    alert('Heures bien enregistrées pour le ' + frDate(editDate) + ' : ' + computeTotal(e) + ' h.');
     state.editDate = null;
     renderWorkerDash();
   };
