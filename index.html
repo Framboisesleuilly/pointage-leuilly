@@ -259,7 +259,6 @@ function renderWorkerLogin(){
       '<div><label>Prénom</label><input type="text" id="fPrenom" placeholder="Ton prénom"></div>' +
       '<div><label>Date de naissance</label><input type="date" id="fDob"></div>' +
       '<div><label>Email (pour ton récap hebdomadaire)</label><input type="text" id="fEmail" placeholder="toi@exemple.fr"></div>' +
-      '<div><label>Téléphone (pour le rappel SMS si oubli)</label><input type="text" id="fPhone" placeholder="0612345678"></div>' +
       '<div id="loginErr" class="banner hidden"></div>' +
       '<button class="btn btn-primary" id="btnLogin">Se connecter</button>' +
     '</div>';
@@ -267,7 +266,6 @@ function renderWorkerLogin(){
     var prenom = document.getElementById('fPrenom').value.trim();
     var dob = document.getElementById('fDob').value;
     var email = document.getElementById('fEmail').value.trim();
-    var phone = document.getElementById('fPhone').value.trim();
     var errEl = document.getElementById('loginErr');
     if(!prenom || !dob){
       errEl.textContent = 'Entre ton prénom et ta date de naissance.';
@@ -283,13 +281,10 @@ function renderWorkerLogin(){
         errEl.classList.remove('hidden');
         return;
       }
-      var changed = false;
-      if(email && existing.email !== email){ existing.email = email; changed = true; }
-      if(phone && existing.phone !== phone){ existing.phone = phone; changed = true; }
-      if(changed) await saveWorkers(workers);
+      if(email && existing.email !== email){ existing.email = email; await saveWorkers(workers); }
       state.worker = existing;
     } else {
-      var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob, email:email, phone:phone };
+      var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob, email:email };
       workers.push(w);
       await saveWorkers(workers);
       state.worker = w;
@@ -546,17 +541,15 @@ function renderWorkerParams(){
     '<div class="card stack">' +
       '<div><label>Prénom</label><input type="text" id="pPrenom" value="'+state.worker.prenom+'" disabled></div>' +
       '<div><label>Email pour le récap hebdomadaire</label><input type="text" id="pEmail" value="'+(state.worker.email||'')+'"></div>' +
-      '<div><label>Téléphone pour le rappel SMS</label><input type="text" id="pPhone" value="'+(state.worker.phone||'')+'"></div>' +
       '<div id="paramsMsg" class="banner ok hidden">Informations mises à jour.</div>' +
       '<button class="btn btn-primary" id="btnSaveEmail">Enregistrer</button>' +
       '<button class="btn btn-ghost" id="btnLogoutParams">Se déconnecter</button>' +
     '</div>';
   document.getElementById('btnSaveEmail').onclick = async function(){
     var email = document.getElementById('pEmail').value.trim();
-    var phone = document.getElementById('pPhone').value.trim();
     var workers = await getWorkers();
     var w = workers.find(function(x){ return x.id === state.worker.id; });
-    if(w){ w.email = email; w.phone = phone; await saveWorkers(workers); state.worker = w; }
+    if(w){ w.email = email; await saveWorkers(workers); state.worker = w; }
     var msg = document.getElementById('paramsMsg');
     msg.classList.remove('hidden');
   };
