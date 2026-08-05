@@ -158,6 +158,16 @@ function extractPeriodLabel(rawText){
   var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
   return moisNoms[parseInt(m[2],10)-1] + '-' + m[3];
 }
+function extractPayrollInfo(rawText){
+  var info = { netAPayer: null, cotisations: null, heuresBulletin: null };
+  var mNet = rawText.match(/Montant net à payer\s*:\s*([\d]+[.,][\d]{2})/);
+  if(mNet) info.netAPayer = parseFloat(mNet[1].replace(',','.'));
+  var mCot = rawText.match(/Total des cotisations et contributions obligatoires\s+([\d]+[.,][\d]{2})/);
+  if(mCot) info.cotisations = parseFloat(mCot[1].replace(',','.'));
+  var mH = rawText.match(/Nombre total d'heures\s+([\d]+[.,][\d]{2})/);
+  if(mH) info.heuresBulletin = parseFloat(mH[1].replace(',','.'));
+  return info;
+}
 
 var state = { screen:'home', worker:null, editDate:null, expandedMonth:null };
 
@@ -208,6 +218,7 @@ function render(){
   if(state.screen==='adminDash') return renderAdminDash();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
   if(state.screen==='adminBulkImport') return renderAdminBulkImport();
+  if(state.screen==='adminPayroll') return renderAdminPayroll();
 }
 
 btnMenu.onclick = function(){ navMenu.classList.toggle('hidden'); };
@@ -544,6 +555,15 @@ async function renderAdminDash(){
 
   if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; }
 
+  var docStatusHtml = '';
+  for(var k=0;k<workers.length;k++){
+    var dw = workers[k];
+    var wdocs = await getDocuments(dw.id);
+    var has = wdocs.length > 0;
+    docStatusHtml += '<div class="worker-row"><span class="worker-name">'+dw.prenom+'</span><span class="'+(has?'':'muted')+'" style="font-weight:'+(has?'700':'400')+';color:'+(has?'var(--moss)':'var(--red)')+';">'+(has?('✓ '+wdocs.length+' document(s)'):'✗ aucun document')+'</span></div>';
+  }
+  if(!workers.length) docStatusHtml = '<p class="muted">Aucun salarié pour l\'instant.</p>';
+
   mods.sort(function(a,b){ return (b.quand||'').localeCompare(a.quand||''); });
   var modsHtml = '';
   if(mods.length){
@@ -560,12 +580,20 @@ async function renderAdminDash(){
     '</div>' +
     '<button class="btn btn-gold" id="btnExport">Exporter en Excel</button>' +
     '<button class="btn btn-ghost" id="btnBulkImport">Importer des documents en masse</button>' +
+    '<button class="btn btn-ghost" id="btnPayroll">Récap virements &amp; cotisations</button>' +
+    '<div class="section-title">Suivi des documents</div>' +
+    '<div class="card">' + docStatusHtml + '</div>' +
     '<div class="link-row" id="btnResetInfo">Les identifiants sont : prénom + date de naissance donnés en début de saison.</div>' +
     '<div class="section-title">Journal des modifications</div>' +
     '<div class="card">' + modsHtml + '</div>';
 
   document.getElementById('btnBulkImport').onclick = function(){
     state.screen = 'adminBulkImport';
+    render();
+  };
+
+  document.getElementById('btnPayroll').onclick = function(){
+    state.screen = 'adminPayroll';
     render();
   };
 
@@ -648,9 +676,22 @@ async function renderAdminWorkerDetail(){
     var fileInput = document.getElementById('docFile');
     var file = fileInput.files[0];
     if(!file){ alert('Choisis un fichier d\'abord.'); return; }
+    var periodLabel = null;
+    var payroll = { netAPayer: null, cotisations: null, heuresBulletin: null };
+    if(file.type === 'application/pdf' && window.pdfjsLib){
+      var text = await extractPdfText(file);
+      if(text){ periodLabel = extractPeriodLabel(text); payroll = extractPayrollInfo(text); }
+    }
+    if(!periodLabel){
+      var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+      var now = new Date();
+      periodLabel = moisNoms[now.getMonth()] + '-' + now.getFullYear();
+    }
+    var ext = file.name.split('.').pop();
+    var niceName = 'Bulletin_'+w.prenom+'_'+periodLabel+'.'+ext;
     var base64 = await fileToBase64(file);
     var current = await getDocuments(w.id);
-    current.push({ id: 'doc-'+Date.now(), name: file.name, type: file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString() });
+    current.push({ id: 'doc-'+Date.now(), name: niceName, type: file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString(), periodLabel: periodLabel, netAPayer: payroll.netAPayer, cotisations: payroll.cotisations, heuresBulletin: payroll.heuresBulletin });
     await saveDocuments(w.id, current);
     renderAdminWorkerDetail();
   };
@@ -769,18 +810,20 @@ async function renderAdminBulkImport(){
       var file = files[i];
       var match = null;
       var periodLabel = null;
+      var payroll = { netAPayer: null, cotisations: null, heuresBulletin: null };
       if(file.type === 'application/pdf' && window.pdfjsLib){
         var text = await extractPdfText(file);
         if(text){
           match = findWorkerInText(text, workers);
           periodLabel = extractPeriodLabel(text);
+          payroll = extractPayrollInfo(text);
         }
       }
       if(!match){
         var nameNorm = normalize(file.name);
         match = workers.find(function(w){ return w.key && nameNorm.indexOf(w.key) !== -1; });
       }
-      detections.push({ file: file, match: match, periodLabel: periodLabel });
+      detections.push({ file: file, match: match, periodLabel: periodLabel, payroll: payroll });
     }
 
     var rowsHtml = detections.map(function(d, i){
@@ -819,8 +862,14 @@ async function renderAdminBulkImport(){
           var d = byWorker[wid][j];
           var base64 = await fileToBase64(d.file);
           var ext = d.file.name.split('.').pop();
-          var niceName = worker ? 'Bulletin_'+worker.prenom+(d.periodLabel?'_'+d.periodLabel:'')+'.'+ext : d.file.name;
-          current.push({ id: 'doc-'+Date.now()+'-'+j, name: niceName, type: d.file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString() });
+          var pLabel = d.periodLabel;
+          if(!pLabel){
+            var moisNoms2 = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+            var now2 = new Date();
+            pLabel = moisNoms2[now2.getMonth()] + '-' + now2.getFullYear();
+          }
+          var niceName = worker ? 'Bulletin_'+worker.prenom+'_'+pLabel+'.'+ext : d.file.name;
+          current.push({ id: 'doc-'+Date.now()+'-'+j, name: niceName, type: d.file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString(), periodLabel: pLabel, netAPayer: d.payroll.netAPayer, cotisations: d.payroll.cotisations, heuresBulletin: d.payroll.heuresBulletin });
           count++;
         }
         await saveDocuments(wid, current);
@@ -828,6 +877,82 @@ async function renderAdminBulkImport(){
       resultEl.textContent = count + ' document(s) importé(s)' + (skipped ? ', ' + skipped + ' ignoré(s) (pas de salarié choisi)' : '') + '.';
     };
   });
+}
+
+async function renderAdminPayroll(){
+  headerTitle.textContent = 'Virements & cotisations';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+
+  var rows = [];
+  var totalNet = 0, totalCot = 0;
+  for(var i=0;i<workers.length;i++){
+    var w = workers[i];
+    var docs = await getDocuments(w.id);
+    var withPay = docs.filter(function(d){ return d.netAPayer !== null && d.netAPayer !== undefined; });
+    withPay.sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); });
+    var latest = withPay[0] || null;
+
+    var entries = await getEntries(w.id);
+    var heuresMois = null;
+    if(latest && latest.periodLabel){
+      var parts = latest.periodLabel.split('-');
+      var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+      var mi = moisNoms.indexOf(parts[0]);
+      if(mi !== -1){
+        var ym = parts[1] + '-' + String(mi+1).padStart(2,'0');
+        heuresMois = 0;
+        Object.keys(entries).forEach(function(d){ if(d.slice(0,7)===ym){ var t=computeTotal(entries[d]); if(t) heuresMois += t; } });
+        heuresMois = round2(heuresMois);
+      }
+    }
+
+    if(latest){ totalNet += latest.netAPayer||0; totalCot += latest.cotisations||0; }
+    rows.push({ prenom: w.prenom, doc: latest, heuresMois: heuresMois });
+  }
+  totalNet = round2(totalNet); totalCot = round2(totalCot);
+
+  var html = '<p class="muted" style="margin-bottom:14px;">Montants extraits automatiquement des derniers bulletins importés pour chaque salarié — à vérifier avant tout virement, l\'extraction peut se tromper selon la mise en page du bulletin.</p>';
+  html += '<div class="card">';
+  rows.forEach(function(r){
+    if(!r.doc){
+      html += '<div class="worker-row"><span class="worker-name">'+r.prenom+'</span><span class="muted">aucun bulletin importé</span></div>';
+    } else {
+      html += '<div class="worker-row" style="align-items:flex-start;">' +
+        '<span class="worker-name">'+r.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+(r.doc.periodLabel||'')+(r.heuresMois!==null?' — '+r.heuresMois+' h (app)':'')+(r.doc.heuresBulletin?' / '+r.doc.heuresBulletin+' h (bulletin)':'')+'</span></span>' +
+        '<span style="text-align:right;">' +
+          '<span class="worker-hours" style="display:block;">'+(r.doc.netAPayer!==null?r.doc.netAPayer+' €':'—')+'</span>' +
+          '<span class="muted" style="font-size:12px;">cotis. '+(r.doc.cotisations!==null?r.doc.cotisations+' €':'—')+'</span>' +
+        '</span>' +
+      '</div>';
+    }
+  });
+  html += '</div>';
+
+  html += '<div class="card">' +
+    '<div class="worker-row"><span class="worker-name">Total à virer</span><span class="worker-hours">'+totalNet+' €</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Total cotisations (MSA et autres)</span><span class="worker-hours">'+totalCot+' €</span></div>' +
+  '</div>';
+
+  html += '<button class="btn btn-gold" id="btnExportPayroll">Exporter en Excel</button>';
+  html += '<button class="btn btn-ghost" id="btnBackPayroll">‹ Retour à l\'équipe</button>';
+
+  app.innerHTML = html;
+
+  document.getElementById('btnBackPayroll').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnExportPayroll').onclick = function(){
+    var wb = XLSX.utils.book_new();
+    var data = [['Prénom','Période','Heures (app)','Heures (bulletin)','Net à virer (€)','Cotisations (€)']];
+    rows.forEach(function(r){
+      data.push([r.prenom, r.doc?r.doc.periodLabel||'':'', r.heuresMois!==null?r.heuresMois:'', r.doc?r.doc.heuresBulletin||'':'', r.doc?r.doc.netAPayer||'':'', r.doc?r.doc.cotisations||'':'']);
+    });
+    data.push([]);
+    data.push(['TOTAL','','','', totalNet, totalCot]);
+    var ws = XLSX.utils.aoa_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Virements');
+    XLSX.writeFile(wb, 'Virements_'+todayISO()+'.xlsx');
+  };
 }
 
 function exportExcel(allData, mods){
