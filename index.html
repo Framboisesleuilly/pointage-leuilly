@@ -315,6 +315,7 @@ async function renderWorkerDash(){
   html +=
     '<div class="card stack">' +
       '<label style="margin-bottom:0;font-size:14px;color:var(--ink-soft);">' + (isToday ? 'Aujourd\'hui — ' : 'Modifier — ') + frDate(editDate) + '</label>' +
+      '<div><label>Ou choisir un autre jour</label><input type="date" id="freeDatePick" value="'+editDate+'" max="'+today+'"></div>' +
       '<div class="grid2">' +
         '<div><label>Matin début</label><input type="time" id="mD" value="'+(current.matinDebut||(isToday?'06:00':''))+'"></div>' +
         '<div><label>Matin fin</label><input type="time" id="mF" value="'+(current.matinFin||'')+'"></div>' +
@@ -342,6 +343,11 @@ async function renderWorkerDash(){
   }
 
   app.innerHTML = html;
+
+  document.getElementById('freeDatePick').addEventListener('change', function(){
+    state.editDate = (this.value === today) ? null : this.value;
+    renderWorkerDash();
+  });
 
   function updateLive(){
     var e = {
@@ -556,11 +562,36 @@ async function renderAdminDash(){
   if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; }
 
   var docStatusHtml = '';
+  var moisNomsDoc = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
   for(var k=0;k<workers.length;k++){
     var dw = workers[k];
     var wdocs = await getDocuments(dw.id);
-    var has = wdocs.length > 0;
-    docStatusHtml += '<div class="worker-row"><span class="worker-name">'+dw.prenom+'</span><span class="'+(has?'':'muted')+'" style="font-weight:'+(has?'700':'400')+';color:'+(has?'var(--moss)':'var(--red)')+';">'+(has?('✓ '+wdocs.length+' document(s)'):'✗ aucun document')+'</span></div>';
+    var wentries = await getEntries(dw.id);
+
+    var monthsWorked = {};
+    Object.keys(wentries).forEach(function(d){
+      var t = computeTotal(wentries[d]);
+      if(t) monthsWorked[d.slice(0,7)] = true;
+    });
+    var monthKeys = Object.keys(monthsWorked).sort();
+
+    var docMonthLabels = {};
+    wdocs.forEach(function(doc){ if(doc.periodLabel) docMonthLabels[doc.periodLabel] = true; });
+
+    docStatusHtml += '<div class="worker-row" style="align-items:flex-start;"><span class="worker-name">'+dw.prenom+'</span>';
+    if(!monthKeys.length){
+      docStatusHtml += '<span class="muted">aucune heure saisie</span></div>';
+    } else {
+      docStatusHtml += '<span style="text-align:right;">';
+      monthKeys.forEach(function(ym){
+        var parts = ym.split('-');
+        var label = moisNomsDoc[parseInt(parts[1],10)-1].normalize('NFD').replace(/[\u0300-\u036f]/g,'') + '-' + parts[0];
+        var displayLabel = moisNomsDoc[parseInt(parts[1],10)-1] + ' ' + parts[0];
+        var has = !!docMonthLabels[label];
+        docStatusHtml += '<span style="display:block;font-size:13px;color:'+(has?'var(--moss)':'var(--red)')+';">'+(has?'✓':'✗')+' '+displayLabel+'</span>';
+      });
+      docStatusHtml += '</span></div>';
+    }
   }
   if(!workers.length) docStatusHtml = '<p class="muted">Aucun salarié pour l\'instant.</p>';
 
