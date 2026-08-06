@@ -128,7 +128,10 @@ async function getBarquettes(date){
   try{ var r = await fetch('/api/barquettes?date='+date); return r.ok ? await r.json() : []; }catch(err){ return []; }
 }
 async function saveBarquettes(date, list){
-  await fetch('/api/barquettes?date='+date, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)});
+  try{
+    var r = await fetch('/api/barquettes?date='+date, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)});
+    return r.ok;
+  }catch(err){ return false; }
 }
 async function getSorters(){
   try{ var r = await fetch('/api/sorters'); return r.ok ? await r.json() : []; }catch(err){ return []; }
@@ -188,7 +191,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -581,18 +584,22 @@ async function renderSorterEntry(){
   var date = state.sorterDate || todayISO();
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var list = await getBarquettes(date);
+  var editIdx = state.sorterEditIdx;
+  var editing = (editIdx !== null && editIdx !== undefined && list[editIdx]);
 
   var totalBarq = list.reduce(function(s,e){ return s + (parseInt(e.barquettes,10)||0); }, 0);
   var totalKg = round2(totalBarq * 0.125);
 
   var html =
     '<div class="card stack">' +
-      '<div><label>Date</label><input type="date" id="sorterDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
+      '<div><label>Date</label><input type="date" id="sorterDatePick" value="'+date+'" max="'+todayISO()+'"'+(editing?' disabled':'')+'></div>' +
+      (editing ? '<p class="muted">Modification de la saisie sélectionnée.</p>' : '') +
       '<div class="grid2">' +
-        '<div><label>N° cueilleur (1-56)</label><input type="number" id="cNum" min="1" max="56" placeholder="Ex: 12"></div>' +
-        '<div><label>Nombre de barquettes</label><input type="number" id="cBarq" min="1" placeholder="Ex: 8"></div>' +
+        '<div><label>N° cueilleur (1-56)</label><input type="number" id="cNum" min="1" max="56" placeholder="Ex: 12" value="'+(editing?list[editIdx].cueilleurNum:'')+'"></div>' +
+        '<div><label>Nombre de barquettes</label><input type="number" id="cBarq" min="1" placeholder="Ex: 8" value="'+(editing?list[editIdx].barquettes:'')+'"></div>' +
       '</div>' +
-      '<button class="btn btn-gold" id="btnAddBarq">Ajouter</button>' +
+      '<button class="btn btn-gold" id="btnAddBarq">'+(editing?'Enregistrer la modification':'Ajouter')+'</button>' +
+      (editing ? '<button class="btn btn-ghost" id="btnCancelEditBarq">Annuler</button>' : '') +
     '</div>' +
     '<div class="card">' +
       '<div class="total-line" style="border-top:none;padding-top:0;"><span>Total du jour</span><span class="val">'+totalBarq+' barquettes (~'+totalKg+' kg)</span></div>' +
@@ -603,7 +610,7 @@ async function renderSorterEntry(){
     list.slice().reverse().forEach(function(e, revIdx){
       var idx = list.length - 1 - revIdx;
       var heure = e.timestamp ? new Date(e.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : '';
-      html += '<div class="hist-item"><span class="hist-date">Cueilleur n°'+e.cueilleurNum+' — '+e.barquettes+' barquette(s)<br><span class="muted">'+heure+' par '+e.sorterPrenom+'</span></span><button class="btn btn-ghost" style="width:auto;padding:6px 12px;color:var(--red);" data-delidx="'+idx+'">✕</button></div>';
+      html += '<div class="hist-item"><span class="hist-date">Cueilleur n°'+e.cueilleurNum+' — '+e.barquettes+' barquette(s)<br><span class="muted">'+heure+' par '+e.sorterPrenom+'</span></span><span><button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-editidx="'+idx+'">✎</button> <button class="btn btn-ghost" style="width:auto;padding:6px 10px;color:var(--red);" data-delidx="'+idx+'">✕</button></span></div>';
     });
     html += '</div>';
   }
@@ -612,8 +619,14 @@ async function renderSorterEntry(){
 
   document.getElementById('sorterDatePick').addEventListener('change', function(){
     state.sorterDate = this.value;
+    state.sorterEditIdx = null;
     renderSorterEntry();
   });
+
+  var cancelEditBtn = document.getElementById('btnCancelEditBarq');
+  if(cancelEditBtn){
+    cancelEditBtn.onclick = function(){ state.sorterEditIdx = null; renderSorterEntry(); };
+  }
 
   document.getElementById('btnAddBarq').onclick = async function(){
     var num = parseInt(document.getElementById('cNum').value, 10);
@@ -621,17 +634,34 @@ async function renderSorterEntry(){
     if(!num || num<1 || num>56){ alert('Numéro de cueilleur invalide (1 à 56).'); return; }
     if(!barq || barq<1){ alert('Renseigne un nombre de barquettes.'); return; }
     var current = await getBarquettes(date);
-    current.push({ cueilleurNum: num, barquettes: barq, sorterWorkerId: state.worker.id, sorterPrenom: state.worker.prenom, timestamp: new Date().toISOString() });
-    await saveBarquettes(date, current);
+    if(editing){
+      current[editIdx].cueilleurNum = num;
+      current[editIdx].barquettes = barq;
+      current[editIdx].modifieLe = new Date().toISOString();
+    } else {
+      current.push({ cueilleurNum: num, barquettes: barq, sorterWorkerId: state.worker.id, sorterPrenom: state.worker.prenom, timestamp: new Date().toISOString() });
+    }
+    var ok = await saveBarquettes(date, current);
+    if(!ok){ alert('Erreur : l\'enregistrement a échoué. Vérifie ta connexion et réessaie.'); return; }
+    state.sorterEditIdx = null;
     renderSorterEntry();
   };
+
+  document.querySelectorAll('button[data-editidx]').forEach(function(btn){
+    btn.onclick = function(){
+      state.sorterEditIdx = parseInt(btn.getAttribute('data-editidx'), 10);
+      renderSorterEntry();
+    };
+  });
 
   document.querySelectorAll('button[data-delidx]').forEach(function(btn){
     btn.onclick = async function(){
       var idx = parseInt(btn.getAttribute('data-delidx'), 10);
       var current = await getBarquettes(date);
       current.splice(idx, 1);
-      await saveBarquettes(date, current);
+      var ok = await saveBarquettes(date, current);
+      if(!ok){ alert('Erreur lors de la suppression. Réessaie.'); return; }
+      state.sorterEditIdx = null;
       renderSorterEntry();
     };
   });
@@ -1271,7 +1301,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null }; render(); };
 
 render();
 })();
