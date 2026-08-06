@@ -91,6 +91,7 @@
   <div id="navMenu" class="hidden nav-menu">
     <button data-go="workerDash">Pointages</button>
     <button data-go="workerRapport">Rapport</button>
+    <button id="navTriBtn" data-go="sorterEntry" class="hidden">Tri</button>
     <button data-go="workerDocs">Documents</button>
     <button data-go="workerParams">Paramètres</button>
   </div>
@@ -109,7 +110,7 @@ var btnMenu = document.getElementById('btnMenu');
 var navMenu = document.getElementById('navMenu');
 var ADMIN_CODE = "LEUILLY2026";
 
-var WORKER_SCREENS = ['workerDash','workerRapport','workerDocs','workerParams'];
+var WORKER_SCREENS = ['workerDash','workerRapport','workerDocs','workerParams','sorterEntry'];
 
 async function getDocuments(workerId){
   try{ var r = await fetch('/api/documents?workerId='+encodeURIComponent(workerId)); return r.ok ? await r.json() : []; }catch(err){ return []; }
@@ -226,9 +227,10 @@ function render(){
   var showMenu = WORKER_SCREENS.indexOf(state.screen) !== -1;
   btnMenu.classList.toggle('hidden', !showMenu);
   navMenu.classList.add('hidden');
+  var navTriBtn = document.getElementById('navTriBtn');
+  if(navTriBtn) navTriBtn.classList.toggle('hidden', !(state.worker && state.worker.isTrieur));
   if(state.screen==='home') return renderHome();
   if(state.screen==='workerLogin') return renderWorkerLogin();
-  if(state.screen==='sorterLogin') return renderSorterLogin();
   if(state.screen==='sorterEntry') return renderSorterEntry();
   if(state.screen==='workerDash') return renderWorkerDash();
   if(state.screen==='workerRapport') return renderWorkerRapport();
@@ -259,16 +261,11 @@ function renderHome(){
       '<div class="t">Je suis salarié</div>' +
       '<div class="s">Remplir mes heures du jour</div>' +
     '</button>' +
-    '<button class="home-btn" id="goSorter">' +
-      '<div class="t">Je suis au tri</div>' +
-      '<div class="s">Saisir les barquettes par cueilleur</div>' +
-    '</button>' +
     '<button class="home-btn" id="goAdmin">' +
       '<div class="t">Espace responsable</div>' +
       '<div class="s">Voir et exporter les heures de l\'équipe</div>' +
     '</button>';
   document.getElementById('goWorker').onclick = function(){ state.screen='workerLogin'; render(); };
-  document.getElementById('goSorter').onclick = function(){ state.screen='sorterLogin'; render(); };
   document.getElementById('goAdmin').onclick = function(){ state.screen='adminLogin'; render(); };
 }
 
@@ -579,39 +576,6 @@ function renderWorkerParams(){
   };
 }
 
-function renderSorterLogin(){
-  headerTitle.textContent = 'Connexion tri';
-  app.innerHTML =
-    '<div class="card stack">' +
-      '<div><label>Prénom</label><input type="text" id="sPrenom" placeholder="Ton prénom"></div>' +
-      '<div><label>Code d\'accès</label><input type="text" id="sCode" placeholder="Code donné par le responsable"></div>' +
-      '<div id="sorterLoginErr" class="banner hidden"></div>' +
-      '<button class="btn btn-primary" id="btnSorterLogin">Se connecter</button>' +
-    '</div>';
-  document.getElementById('btnSorterLogin').onclick = async function(){
-    var prenom = document.getElementById('sPrenom').value.trim();
-    var code = document.getElementById('sCode').value.trim();
-    var errEl = document.getElementById('sorterLoginErr');
-    if(!prenom || !code){
-      errEl.textContent = 'Entre ton prénom et ton code d\'accès.';
-      errEl.classList.remove('hidden');
-      return;
-    }
-    var sorters = await getSorters();
-    var key = normalize(prenom);
-    var match = sorters.find(function(s){ return s.key===key && s.code===code; });
-    if(!match){
-      errEl.textContent = 'Prénom ou code incorrect.';
-      errEl.classList.remove('hidden');
-      return;
-    }
-    state.sorter = match;
-    state.sorterDate = null;
-    state.screen = 'sorterEntry';
-    render();
-  };
-}
-
 async function renderSorterEntry(){
   headerTitle.textContent = 'Tri — barquettes';
   var date = state.sorterDate || todayISO();
@@ -657,7 +621,7 @@ async function renderSorterEntry(){
     if(!num || num<1 || num>56){ alert('Numéro de cueilleur invalide (1 à 56).'); return; }
     if(!barq || barq<1){ alert('Renseigne un nombre de barquettes.'); return; }
     var current = await getBarquettes(date);
-    current.push({ cueilleurNum: num, barquettes: barq, sorterPrenom: state.sorter.prenom, timestamp: new Date().toISOString() });
+    current.push({ cueilleurNum: num, barquettes: barq, sorterWorkerId: state.worker.id, sorterPrenom: state.worker.prenom, timestamp: new Date().toISOString() });
     await saveBarquettes(date, current);
     renderSorterEntry();
   };
@@ -825,6 +789,10 @@ async function renderAdminWorkerDetail(){
   var lockedMonth = validations[editDate.slice(0,7)] || null;
 
   var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';
+  html += '<div class="card" style="display:flex;align-items:center;justify-content:space-between;">' +
+    '<span class="worker-name">Fait aussi du tri</span>' +
+    '<input type="checkbox" id="isTrieurCheck" style="width:22px;height:22px;"'+(w.isTrieur?' checked':'')+'>' +
+  '</div>';
   if(lockedMonth){
     html += '<div class="banner">Attention : ce mois a été validé et signé par '+lockedMonth.prenom+' le '+new Date(lockedMonth.validatedAt).toLocaleDateString('fr-FR')+'. Toute correction restera tracée dans l\'historique.</div>';
   }
@@ -921,6 +889,11 @@ async function renderAdminWorkerDetail(){
     state.screen = 'adminDash';
     render();
   };
+
+  document.getElementById('isTrieurCheck').addEventListener('change', async function(){
+    w.isTrieur = this.checked;
+    await saveWorkers(workers);
+  });
 
   document.getElementById('btnBackAdmin').onclick = function(){
     state.screen = 'adminDash';
@@ -1166,7 +1139,6 @@ async function renderAdminBarquettes(){
   var date = state.adminBarqDate || todayISO();
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var list = await getBarquettes(date);
-  var sorters = await getSorters();
 
   var byCueilleur = {};
   list.forEach(function(e){
@@ -1176,27 +1148,29 @@ async function renderAdminBarquettes(){
   var totalBarq = list.reduce(function(s,e){ return s + (parseInt(e.barquettes,10)||0); }, 0);
   var totalKg = round2(totalBarq * 0.125);
 
-  var html =
-    '<button class="btn btn-ghost" id="btnBackBarq">‹ Retour à l\'équipe</button>' +
-    '<div class="section-title" style="margin-top:14px;">Comptes trieurs</div>' +
-    '<div class="card stack">' +
-      '<div class="grid2">' +
-        '<div><label>Prénom du trieur</label><input type="text" id="newSorterName" placeholder="Prénom"></div>' +
-        '<div><label>Code d\'accès</label><input type="text" id="newSorterCode" placeholder="Ex: 4821"></div>' +
-      '</div>' +
-      '<button class="btn btn-primary" id="btnAddSorter">Créer le compte trieur</button>' +
-    '</div>';
-
-  if(sorters.length){
-    html += '<div class="card">';
-    sorters.forEach(function(s){
-      html += '<div class="worker-row"><span class="worker-name">'+s.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">code : '+s.code+'</span></span><button class="btn btn-ghost" style="width:auto;padding:8px 14px;color:var(--red);" data-delsorter="'+s.id+'">Supprimer</button></div>';
-    });
-    html += '</div>';
+  var byTrieur = {};
+  list.forEach(function(e){
+    var k = e.sorterWorkerId || e.sorterPrenom;
+    if(!byTrieur[k]) byTrieur[k] = { workerId: e.sorterWorkerId||null, prenom: e.sorterPrenom, barq: 0 };
+    byTrieur[k].barq += (parseInt(e.barquettes,10)||0);
+  });
+  var trieurKeys = Object.keys(byTrieur);
+  for(var i=0;i<trieurKeys.length;i++){
+    var t = byTrieur[trieurKeys[i]];
+    t.kg = round2(t.barq * 0.125);
+    t.heures = null;
+    t.kgH = null;
+    if(t.workerId){
+      var wentries = await getEntries(t.workerId);
+      var jourEntry = wentries[date];
+      var h = jourEntry ? computeTotal(jourEntry) : null;
+      if(h){ t.heures = h; t.kgH = round2(t.kg / h); }
+    }
   }
 
-  html += '<div class="section-title">Données du jour</div>' +
-    '<div class="card stack">' +
+  var html =
+    '<button class="btn btn-ghost" id="btnBackBarq">‹ Retour à l\'équipe</button>' +
+    '<div class="card stack" style="margin-top:14px;">' +
       '<div><label>Date</label><input type="date" id="barqDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
     '</div>' +
     '<div class="card">' +
@@ -1205,14 +1179,26 @@ async function renderAdminBarquettes(){
       '<div class="worker-row"><span class="worker-name">Cueilleurs actifs</span><span class="worker-hours">'+cueilleurNums.length+'</span></div>' +
     '</div>';
 
+  html += '<div class="section-title">Par trieur</div><div class="card">';
+  if(trieurKeys.length){
+    trieurKeys.forEach(function(k){
+      var t = byTrieur[k];
+      html += '<div class="worker-row" style="align-items:flex-start;">' +
+        '<span class="worker-name">'+t.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+t.barq+' barquettes — '+t.kg+' kg'+(t.heures!==null?' — '+t.heures+' h pointées':' — heures du jour non trouvées')+'</span></span>' +
+        '<span class="worker-hours">'+(t.kgH!==null?t.kgH+' kg/h':'—')+'</span>' +
+      '</div>';
+    });
+  } else {
+    html += '<p class="muted">Aucune saisie pour cette date.</p>';
+  }
+  html += '</div>';
+
   if(cueilleurNums.length){
     html += '<div class="section-title">Par cueilleur</div><div class="card">';
     cueilleurNums.forEach(function(n){
       html += '<div class="worker-row"><span class="worker-name">Cueilleur n°'+n+'</span><span class="worker-hours">'+byCueilleur[n]+' barquettes</span></div>';
     });
     html += '</div>';
-  } else {
-    html += '<p class="muted">Aucune saisie pour cette date.</p>';
   }
 
   html += '<button class="btn btn-gold" id="btnExportBarq">Exporter en Excel</button>';
@@ -1225,29 +1211,6 @@ async function renderAdminBarquettes(){
     renderAdminBarquettes();
   });
 
-  document.getElementById('btnAddSorter').onclick = async function(){
-    var prenom = document.getElementById('newSorterName').value.trim();
-    var code = document.getElementById('newSorterCode').value.trim();
-    if(!prenom || !code){ alert('Renseigne un prénom et un code.'); return; }
-    var current = await getSorters();
-    var key = normalize(prenom);
-    if(current.find(function(s){ return s.key===key; })){ alert('Un trieur avec ce prénom existe déjà.'); return; }
-    current.push({ id: key+'-'+Date.now(), key:key, prenom:prenom, code:code });
-    await saveSorters(current);
-    renderAdminBarquettes();
-  };
-
-  document.querySelectorAll('button[data-delsorter]').forEach(function(btn){
-    btn.onclick = async function(){
-      if(!confirm('Supprimer ce compte trieur ?')) return;
-      var id = btn.getAttribute('data-delsorter');
-      var current = await getSorters();
-      current = current.filter(function(s){ return s.id !== id; });
-      await saveSorters(current);
-      renderAdminBarquettes();
-    };
-  });
-
   document.getElementById('btnExportBarq').onclick = function(){
     var wb = XLSX.utils.book_new();
     var recap = [['Cueilleur n°','Total barquettes','Kg (x0,125)']];
@@ -1255,7 +1218,15 @@ async function renderAdminBarquettes(){
     recap.push([]);
     recap.push(['TOTAL', totalBarq, totalKg]);
     var wsRecap = XLSX.utils.aoa_to_sheet(recap);
-    XLSX.utils.book_append_sheet(wb, wsRecap, 'Récap');
+    XLSX.utils.book_append_sheet(wb, wsRecap, 'Récap cueilleurs');
+
+    var trieurRows = [['Trieur','Barquettes','Kg','Heures pointées','Kg/h']];
+    trieurKeys.forEach(function(k){
+      var t = byTrieur[k];
+      trieurRows.push([t.prenom, t.barq, t.kg, t.heures!==null?t.heures:'', t.kgH!==null?t.kgH:'']);
+    });
+    var wsTrieurs = XLSX.utils.aoa_to_sheet(trieurRows);
+    XLSX.utils.book_append_sheet(wb, wsTrieurs, 'Par trieur');
 
     var detail = [['Cueilleur n°','Barquettes','Heure','Trieur']];
     list.forEach(function(e){
