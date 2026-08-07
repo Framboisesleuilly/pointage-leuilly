@@ -353,6 +353,7 @@ async function renderWorkerDash(){
         '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"'+dis+'></div>' +
       '</div>' +
       '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"'+dis+'></div>' +
+      '<div><label>Commentaire (facultatif)</label><textarea id="commentaire" rows="2" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:#FBFAF6;color:var(--ink);font-family:inherit;"'+dis+'>'+(current.commentaire||'')+'</textarea></div>' +
       '<div class="total-line"><span>Total du jour</span><span class="val" id="liveTotal">—</span></div>' +
       (lockedMonth ? '' : '<button class="btn btn-gold" id="btnSave">Enregistrer</button>') +
       (isToday ? '' : '<button class="btn btn-ghost" id="btnCancelEdit">Annuler, revenir à aujourd\'hui</button>') +
@@ -369,7 +370,7 @@ async function renderWorkerDash(){
       if(isLocked){
         html += '<div class="hist-item"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' 🔒</span></div>';
       } else {
-        html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
+        html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+(e.commentaire?' 💬':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
       }
     });
     html += '</div>';
@@ -417,7 +418,8 @@ async function renderWorkerDash(){
       matinFin: document.getElementById('mF').value,
       apremDebut: document.getElementById('aD').value,
       apremFin: document.getElementById('aF').value,
-      pause: document.getElementById('pause').value
+      pause: document.getElementById('pause').value,
+      commentaire: document.getElementById('commentaire').value
     };
     if(!e.matinDebut || !e.matinFin){
       alert('Renseigne au moins l\'heure de début et de fin du matin.');
@@ -839,6 +841,7 @@ async function renderAdminWorkerDetail(){
         '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"></div>' +
       '</div>' +
       '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"></div>' +
+      '<div><label>Commentaire (facultatif)</label><textarea id="commentaire" rows="2" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:#FBFAF6;color:var(--ink);font-family:inherit;">'+(current.commentaire||'')+'</textarea></div>' +
       '<div class="total-line"><span>Total du jour</span><span class="val" id="liveTotal">—</span></div>' +
       '<button class="btn btn-gold" id="btnSave">Enregistrer la correction</button>' +
     '</div>';
@@ -850,7 +853,7 @@ async function renderAdminWorkerDetail(){
       var e = entries[d];
       var t = computeTotal(e);
       var edited = e.history && e.history.length > 0;
-      html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
+      html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+(e.commentaire?' 💬':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
     });
     html += '</div>';
   }
@@ -964,7 +967,8 @@ async function renderAdminWorkerDetail(){
       matinFin: document.getElementById('mF').value,
       apremDebut: document.getElementById('aD').value,
       apremFin: document.getElementById('aF').value,
-      pause: document.getElementById('pause').value
+      pause: document.getElementById('pause').value,
+      commentaire: document.getElementById('commentaire').value
     };
     if(!e.matinDebut || !e.matinFin){
       alert('Renseigne au moins l\'heure de début et de fin du matin.');
@@ -1278,12 +1282,12 @@ function exportExcel(allData, mods){
   XLSX.utils.book_append_sheet(wb, wsRecap, 'RECAP');
 
   allData.forEach(function(d){
-    var rows = [['Date','Matin début','Matin fin','Après-midi début','Après-midi fin','Pause (min)','Total jour','Modifié']];
+    var rows = [['Date','Matin début','Matin fin','Après-midi début','Après-midi fin','Pause (min)','Total jour','Modifié','Commentaire']];
     var days = Object.keys(d.entries).sort();
     days.forEach(function(day){
       var e = d.entries[day];
       var edited = e.history && e.history.length ? 'Oui ('+e.history.length+')' : 'Non';
-      rows.push([frDate(day), e.matinDebut||'', e.matinFin||'', e.apremDebut||'', e.apremFin||'', e.pause||0, computeTotal(e), edited]);
+      rows.push([frDate(day), e.matinDebut||'', e.matinFin||'', e.apremDebut||'', e.apremFin||'', e.pause||0, computeTotal(e), edited, e.commentaire||'']);
     });
     var sheetName = d.worker.prenom.substring(0,28) || 'Salarié';
     var ws = XLSX.utils.aoa_to_sheet(rows);
