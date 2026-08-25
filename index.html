@@ -1458,9 +1458,93 @@ async function renderAdminImportHours(){
       '<div><label>Fichier Excel</label><input type="file" id="ihFile" accept=".xlsx,.xls"></div>' +
       '<button class="btn btn-gold" id="btnDoImportHours">Importer</button>' +
       '<div id="ihResult" class="muted"></div>' +
-    '</div>';
+    '</div>' +
+    '<div class="section-title">Ou importer depuis une photo</div>' +
+    '<div class="card stack">' +
+      '<p class="muted">Prends en photo (ou dépose une photo existante de) la feuille de présence manuscrite. L\'IA lit le tableau et te propose les heures détectées, à vérifier avant import.</p>' +
+      '<div><label>Salarié</label><select id="phWorker">'+options+'</select></div>' +
+      '<div><label>Mois concerné</label><input type="month" id="phMonth" value="'+todayISO().slice(0,7)+'"></div>' +
+      '<div><label>Photo de la feuille</label><input type="file" id="phFile" accept="image/*" capture="environment"></div>' +
+      '<button class="btn btn-gold" id="btnAnalyzePhoto">Analyser la photo</button>' +
+      '<div id="phResult" class="muted"></div>' +
+    '</div>' +
+    '<div id="phReview"></div>';
 
   document.getElementById('btnBackImportH').onclick = function(){ state.screen='adminDash'; render(); };
+
+  document.getElementById('btnAnalyzePhoto').onclick = async function(){
+    var workerId = document.getElementById('phWorker').value;
+    var monthVal = document.getElementById('phMonth').value;
+    var file = document.getElementById('phFile').files[0];
+    var resultEl = document.getElementById('phResult');
+    if(!workerId || !monthVal || !file){ alert('Choisis un salarié, un mois et une photo.'); return; }
+    resultEl.textContent = 'Analyse de la photo en cours… (peut prendre 10-20 secondes)';
+    document.getElementById('phReview').innerHTML = '';
+    try{
+      var base64 = await fileToBase64(file);
+      var r = await fetch('/api/analyze-timesheet', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg' })
+      });
+      var data = await r.json();
+      if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error||'inconnue'); return; }
+      var jours = data.jours || [];
+      if(!jours.length){ resultEl.textContent = 'Aucun jour détecté sur la photo.'; return; }
+      resultEl.textContent = jours.length + ' jour(s) détecté(s) — vérifie ci-dessous avant de confirmer.';
+      renderPhotoReview(jours, workerId, monthVal);
+    }catch(err){
+      resultEl.textContent = 'Erreur : ' + err.message;
+    }
+  };
+
+  function renderPhotoReview(jours, workerId, monthVal){
+    var yearMonth = monthVal.split('-');
+    var html = '<div class="section-title">Vérification avant import</div><div class="card">';
+    jours.forEach(function(j, idx){
+      var dateStr = yearMonth[0]+'-'+yearMonth[1]+'-'+String(j.jour).padStart(2,'0');
+      html += '<div style="padding:10px 0;border-bottom:1px solid var(--line);">' +
+        '<div class="muted" style="margin-bottom:6px;">'+frDate(dateStr)+'</div>' +
+        '<div class="grid2">' +
+          '<input type="time" data-f="matinDebut" data-idx="'+idx+'" value="'+(j.matinDebut||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+          '<input type="time" data-f="matinFin" data-idx="'+idx+'" value="'+(j.matinFin||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+        '</div>' +
+        '<div class="grid2" style="margin-top:6px;">' +
+          '<input type="time" data-f="apremDebut" data-idx="'+idx+'" value="'+(j.apremDebut||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+          '<input type="time" data-f="apremFin" data-idx="'+idx+'" value="'+(j.apremFin||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+        '</div>' +
+        '<input type="number" data-f="pauseMinutes" data-idx="'+idx+'" value="'+(j.pauseMinutes||0)+'" placeholder="Pause (min)" style="margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:8px;width:100%;">' +
+      '</div>';
+    });
+    html += '</div><button class="btn btn-gold" id="btnConfirmPhotoImport">Confirmer et importer ces '+jours.length+' jour(s)</button><div id="phConfirmResult" class="muted"></div>';
+    document.getElementById('phReview').innerHTML = html;
+
+    document.querySelectorAll('#phReview input[data-f]').forEach(function(inp){
+      inp.addEventListener('change', function(){
+        var idx = parseInt(this.getAttribute('data-idx'),10);
+        var field = this.getAttribute('data-f');
+        jours[idx][field] = this.value;
+      });
+    });
+
+    document.getElementById('btnConfirmPhotoImport').onclick = async function(){
+      var entries = await getEntries(workerId);
+      var count = 0;
+      jours.forEach(function(j){
+        if(!j.matinDebut || !j.matinFin) return;
+        var dateStr = yearMonth[0]+'-'+yearMonth[1]+'-'+String(j.jour).padStart(2,'0');
+        entries[dateStr] = {
+          matinDebut: j.matinDebut, matinFin: j.matinFin,
+          apremDebut: j.apremDebut||'', apremFin: j.apremFin||'',
+          pause: j.pauseMinutes||0,
+          importeLe: new Date().toISOString(), importeDePhoto: true
+        };
+        count++;
+      });
+      await saveEntries(workerId, entries);
+      document.getElementById('phConfirmResult').textContent = count + ' jour(s) importé(s) avec succès.';
+    };
+  }
 
   function parseDateCell(v){
     if(v instanceof Date){
