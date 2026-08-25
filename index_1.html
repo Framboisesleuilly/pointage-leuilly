@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Pointage — Mont de Leuilly</title>
+<style>
+  :root{
+    --moss:#33502E;
+    --moss-dark:#233A20;
+    --gold:#C89B3C;
+    --gold-dark:#9E7A28;
+    --bg:#F1EEE2;
+    --card:#FFFFFF;
+    --ink:#2B2B24;
+    --ink-soft:#66655B;
+    --line:#DAD6C6;
+    --red:#A32638;
+    --red-bg:#F7E6E8;
+    --green-bg:#E9F0E1;
+    --radius:12px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    min-height:100vh;
+  }
+  .wrap{max-width:480px;margin:0 auto;padding:0 0 60px;}
+  header.top{background:var(--moss);color:#fff;padding:22px 20px 20px;position:relative;}
+  header.top .brand{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.75;margin:0 0 4px;}
+  header.top h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em;}
+  .rows{display:flex;flex-direction:row;justify-content:space-between;align-items:center;}
+  .btn-quit{background:rgba(255,255,255,.12);border:none;color:#fff;font-size:13px;padding:8px 12px;border-radius:8px;cursor:pointer;}
+  main{padding:20px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-bottom:16px;}
+  .stack>*+*{margin-top:14px;}
+  label{display:block;font-size:13px;color:var(--ink-soft);margin-bottom:6px;font-weight:600;}
+  input[type=text],input[type=date],input[type=time],input[type=number],input[type=password]{
+    width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:9px;font-size:16px;background:#FBFAF6;color:var(--ink);
+  }
+  input:focus{outline:2px solid var(--gold);outline-offset:1px;}
+  .btn{width:100%;padding:14px;border-radius:9px;border:none;font-size:16px;font-weight:700;cursor:pointer;}
+  .btn-primary{background:var(--moss);color:#fff;}
+  .btn-primary:active{background:var(--moss-dark);}
+  .btn-gold{background:var(--gold);color:#3A2C0E;}
+  .btn-gold:active{background:var(--gold-dark);}
+  .btn-ghost{background:transparent;color:var(--moss);border:1px solid var(--line);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .banner{background:var(--red-bg);color:var(--red);padding:12px 14px;border-radius:9px;font-size:14px;font-weight:600;margin-bottom:16px;}
+  .banner.ok{background:var(--green-bg);color:#33502E;}
+  .total-line{display:flex;justify-content:space-between;align-items:baseline;padding-top:10px;border-top:1px solid var(--line);}
+  .total-line .val{font-size:26px;font-weight:700;color:var(--moss);}
+  .hist-item{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;}
+  .hist-item:last-child{border-bottom:none;}
+  .hist-date{color:var(--ink-soft);}
+  .hist-total{font-weight:700;}
+  .muted{color:var(--ink-soft);font-size:13px;}
+  .section-title{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);font-weight:700;margin:22px 0 10px 4px;}
+  .worker-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);}
+  .worker-row:last-child{border-bottom:none;}
+  .worker-name{font-weight:600;}
+  .worker-hours{color:var(--moss);font-weight:700;}
+  .link-row{text-align:center;margin-top:14px;font-size:14px;color:var(--moss-dark);text-decoration:underline;cursor:pointer;}
+  .home-btn{display:block;width:100%;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-bottom:14px;text-align:left;cursor:pointer;}
+  .home-btn .t{font-size:17px;font-weight:700;color:var(--moss);}
+  .home-btn .s{font-size:13px;color:var(--ink-soft);margin-top:2px;}
+  .hidden{display:none !important;}
+  .nav-menu{position:absolute;top:64px;right:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.15);overflow:hidden;z-index:50;min-width:180px;}
+  .nav-menu button{display:block;width:100%;text-align:left;padding:14px 16px;border:none;background:none;font-size:15px;font-weight:600;color:var(--ink);cursor:pointer;border-bottom:1px solid var(--line);}
+  .nav-menu button:last-child{border-bottom:none;}
+  .doc-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);}
+  .doc-item:last-child{border-bottom:none;}
+  .label-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  .label-card{border:1px dashed var(--line);border-radius:10px;padding:14px;text-align:center;background:#fff;}
+  .label-card .qr{display:flex;justify-content:center;margin-bottom:6px;}
+  .label-card .num{font-size:20px;font-weight:800;color:var(--moss);}
+  .scanner-overlay{position:fixed;inset:0;background:#000;z-index:200;display:flex;flex-direction:column;}
+  .scanner-overlay video{flex:1;width:100%;object-fit:cover;}
+  .scanner-overlay .scanner-bar{padding:16px;background:var(--moss-dark);display:flex;justify-content:space-between;align-items:center;}
+  .scanner-overlay .scanner-bar span{color:#fff;font-weight:600;}
+  @media print{
+    .no-print{display:none !important;}
+    body{background:#fff;}
+    .wrap{max-width:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="rows">
+      <div>
+        <p class="brand">Mont de Leuilly</p>
+        <h1 id="headerTitle">Pointage</h1>
+      </div>
+      <button class="btn-quit hidden" id="btnMenu" style="margin-right:8px;">☰</button>
+      <button class="btn-quit hidden" id="btnQuit">Quitter</button>
+    </div>
+  </header>
+  <div id="navMenu" class="hidden nav-menu">
+    <button data-go="workerDash">Pointages</button>
+    <button data-go="workerRapport">Rapport</button>
+    <button id="navTriBtn" data-go="sorterEntry" class="hidden">Tri</button>
+    <button data-go="workerDocs">Documents</button>
+    <button data-go="workerParams">Paramètres</button>
+  </div>
+  <main id="app"></main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<script>
+(function(){
+
+var app = document.getElementById('app');
+var headerTitle = document.getElementById('headerTitle');
+var btnQuit = document.getElementById('btnQuit');
+var btnMenu = document.getElementById('btnMenu');
+var navMenu = document.getElementById('navMenu');
+var ADMIN_CODE = "LEUILLY2026";
+
+var WORKER_SCREENS = ['workerDash','workerRapport','workerDocs','workerParams','sorterEntry'];
+
+async function getDocuments(workerId){
+  try{ var r = await fetch('/api/documents?workerId='+encodeURIComponent(workerId)); return r.ok ? await r.json() : []; }catch(err){ return []; }
+}
+async function saveDocuments(workerId, docs){
+  await fetch('/api/documents?workerId='+encodeURIComponent(workerId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(docs)});
+}
+async function getValidations(workerId){
+  try{ var r = await fetch('/api/validations?workerId='+encodeURIComponent(workerId)); return r.ok ? await r.json() : {}; }catch(err){ return {}; }
+}
+async function saveValidations(workerId, validations){
+  await fetch('/api/validations?workerId='+encodeURIComponent(workerId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(validations)});
+}
+async function getBarquettes(date){
+  try{ var r = await fetch('/api/barquettes?date='+date); return r.ok ? await r.json() : []; }catch(err){ return []; }
+}
+async function saveBarquettes(date, list){
+  try{
+    var r = await fetch('/api/barquettes?date='+date, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)});
+    return r.ok;
+  }catch(err){ return false; }
+}
+async function getSorters(){
+  try{ var r = await fetch('/api/sorters'); return r.ok ? await r.json() : []; }catch(err){ return []; }
+}
+async function saveSorters(list){
+  await fetch('/api/sorters', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)});
+}
+function fileToBase64(file){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload = function(){ resolve(reader.result.split(',')[1]); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+if(window.pdfjsLib){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+async function extractPdfText(file){
+  try{
+    var buf = await file.arrayBuffer();
+    var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    var text = '';
+    for(var p=1; p<=pdf.numPages; p++){
+      var page = await pdf.getPage(p);
+      var content = await page.getTextContent();
+      text += content.items.map(function(it){ return it.str; }).join(' ') + ' ';
+    }
+    return text;
+  }catch(err){ return ''; }
+}
+function findWorkerInText(rawText, workers){
+  var norm = normalize(rawText);
+  for(var i=0;i<workers.length;i++){
+    var w = workers[i];
+    if(!w.key) continue;
+    var re = new RegExp('(^|[^a-z])'+w.key+'([^a-z]|$)', 'i');
+    if(re.test(norm)) return w;
+  }
+  return null;
+}
+function extractPeriodLabel(rawText){
+  var m = rawText.match(/[Dd]u\s+(\d{2})\/(\d{2})\/(\d{4})\s+au/);
+  if(!m) return null;
+  var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+  return moisNoms[parseInt(m[2],10)-1] + '-' + m[3];
+}
+function extractPayrollInfo(rawText){
+  var info = { netAPayer: null, cotisations: null, heuresBulletin: null };
+  var mNet = rawText.match(/Montant net à payer\s*:\s*([\d]+[.,][\d]{2})/);
+  if(mNet) info.netAPayer = parseFloat(mNet[1].replace(',','.'));
+  var mCot = rawText.match(/Total des cotisations et contributions obligatoires\s+([\d]+[.,][\d]{2})/);
+  if(mCot) info.cotisations = parseFloat(mCot[1].replace(',','.'));
+  var mH = rawText.match(/Nombre total d'heures\s+([\d]+[.,][\d]{2})/);
+  if(mH) info.heuresBulletin = parseFloat(mH[1].replace(',','.'));
+  return info;
+}
+
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null };
+
+function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
+function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function round2(n){ return Math.round(n*100)/100; }
+function timeToDecimal(t){ if(!t) return null; var parts = t.split(':'); return parseInt(parts[0],10) + parseInt(parts[1],10)/60; }
+
+function computeTotal(e){
+  if(!e.matinDebut || !e.matinFin) return null;
+  var m = timeToDecimal(e.matinFin) - timeToDecimal(e.matinDebut);
+  var a = 0;
+  if(e.apremDebut && e.apremFin){ a = timeToDecimal(e.apremFin) - timeToDecimal(e.apremDebut); }
+  var pause = (parseFloat(e.pause)||0)/60;
+  var total = m + a - pause;
+  if(total < 0) total = 0;
+  return round2(total);
+}
+
+async function getWorkers(){
+  try{ var r = await fetch('/api/workers'); return r.ok ? await r.json() : []; }catch(err){ return []; }
+}
+async function saveWorkers(list){
+  await fetch('/api/workers', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)});
+}
+async function getEntries(workerId){
+  try{ var r = await fetch('/api/entries?workerId='+encodeURIComponent(workerId)); return r.ok ? await r.json() : {}; }catch(err){ return {}; }
+}
+async function saveEntries(workerId, entries){
+  await fetch('/api/entries?workerId='+encodeURIComponent(workerId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(entries)});
+}
+function normalize(s){
+  return (s||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+function render(){
+  btnQuit.classList.toggle('hidden', state.screen==='home');
+  var showMenu = WORKER_SCREENS.indexOf(state.screen) !== -1;
+  btnMenu.classList.toggle('hidden', !showMenu);
+  navMenu.classList.add('hidden');
+  var navTriBtn = document.getElementById('navTriBtn');
+  if(navTriBtn) navTriBtn.classList.toggle('hidden', !(state.worker && state.worker.isTrieur));
+  if(state.screen==='home') return renderHome();
+  if(state.screen==='workerLogin') return renderWorkerLogin();
+  if(state.screen==='sorterEntry') return renderSorterEntry();
+  if(state.screen==='workerDash') return renderWorkerDash();
+  if(state.screen==='workerRapport') return renderWorkerRapport();
+  if(state.screen==='workerDocs') return renderWorkerDocs();
+  if(state.screen==='workerParams') return renderWorkerParams();
+  if(state.screen==='adminLogin') return renderAdminLogin();
+  if(state.screen==='adminDash') return renderAdminDash();
+  if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
+  if(state.screen==='adminBulkImport') return renderAdminBulkImport();
+  if(state.screen==='adminPayroll') return renderAdminPayroll();
+  if(state.screen==='adminBarquettes') return renderAdminBarquettes();
+  if(state.screen==='adminLabels') return renderAdminLabels();
+  if(state.screen==='adminNewWorker') return renderAdminNewWorker();
+  if(state.screen==='adminImportHours') return renderAdminImportHours();
+}
+
+btnMenu.onclick = function(){ navMenu.classList.toggle('hidden'); };
+navMenu.querySelectorAll('button[data-go]').forEach(function(btn){
+  btn.onclick = function(){
+    state.screen = btn.getAttribute('data-go');
+    state.editDate = null;
+    navMenu.classList.add('hidden');
+    render();
+  };
+});
+
+function renderHome(){
+  headerTitle.textContent = 'Pointage';
+  app.innerHTML =
+    '<button class="home-btn" id="goWorker">' +
+      '<div class="t">Je suis salarié</div>' +
+      '<div class="s">Remplir mes heures du jour</div>' +
+    '</button>' +
+    '<button class="home-btn" id="goAdmin">' +
+      '<div class="t">Espace responsable</div>' +
+      '<div class="s">Voir et exporter les heures de l\'équipe</div>' +
+    '</button>';
+  document.getElementById('goWorker').onclick = function(){ state.screen='workerLogin'; render(); };
+  document.getElementById('goAdmin').onclick = function(){ state.screen='adminLogin'; render(); };
+}
+
+function renderWorkerLogin(){
+  headerTitle.textContent = 'Connexion';
+  app.innerHTML =
+    '<div class="card stack">' +
+      '<div><label>Prénom</label><input type="text" id="fPrenom" placeholder="Ton prénom"></div>' +
+      '<div><label>Date de naissance</label><input type="date" id="fDob"></div>' +
+      '<div><label>Email (pour ton récap hebdomadaire)</label><input type="text" id="fEmail" placeholder="toi@exemple.fr"></div>' +
+      '<div id="loginErr" class="banner hidden"></div>' +
+      '<button class="btn btn-primary" id="btnLogin">Se connecter</button>' +
+    '</div>';
+  document.getElementById('btnLogin').onclick = async function(){
+    var prenom = document.getElementById('fPrenom').value.trim();
+    var dob = document.getElementById('fDob').value;
+    var email = document.getElementById('fEmail').value.trim();
+    var errEl = document.getElementById('loginErr');
+    if(!prenom || !dob){
+      errEl.textContent = 'Entre ton prénom et ta date de naissance.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    var workers = await getWorkers();
+    var key = normalize(prenom);
+    var existing = workers.find(function(w){ return w.key===key; });
+    if(existing){
+      if(existing.dob !== dob){
+        errEl.textContent = 'Prénom ou date de naissance incorrect.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if(email && existing.email !== email){ existing.email = email; await saveWorkers(workers); }
+      state.worker = existing;
+    } else {
+      var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob, email:email };
+      workers.push(w);
+      await saveWorkers(workers);
+      state.worker = w;
+    }
+    state.editDate = null;
+    state.screen = 'workerDash';
+    render();
+  };
+}
+
+async function renderWorkerDash(){
+  headerTitle.textContent = state.worker.prenom;
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var entries = await getEntries(state.worker.id);
+  var validations = await getValidations(state.worker.id);
+  var today = todayISO();
+  var editDate = state.editDate || today;
+  var isToday = editDate === today;
+  var lockedMonth = validations[editDate.slice(0,7)] || null;
+  var current = entries[editDate] || {};
+  var alreadyFilled = current.matinDebut && current.matinFin;
+  var wasEdited = current.history && current.history.length > 0;
+
+  var html = '';
+  if(lockedMonth){
+    html += '<div class="banner">Ce mois a été validé et signé le '+new Date(lockedMonth.validatedAt).toLocaleDateString('fr-FR')+'. Contacte le responsable pour toute correction.</div>';
+  } else if(isToday && !alreadyFilled){
+    html += '<div class="banner">N\'oublie pas de remplir tes heures aujourd\'hui !</div>';
+  } else if(isToday){
+    html += '<div class="banner ok">Heures du jour enregistrées.</div>';
+  } else {
+    html += '<div class="banner ok">Modification du ' + frDate(editDate) + (wasEdited ? ' — déjà modifié '+current.history.length+' fois' : '') + '.</div>';
+  }
+
+  var dis = lockedMonth ? ' disabled' : '';
+  html +=
+    '<div class="card stack">' +
+      '<label style="margin-bottom:0;font-size:14px;color:var(--ink-soft);">' + (isToday ? 'Aujourd\'hui — ' : 'Modifier — ') + frDate(editDate) + '</label>' +
+      '<div><label>Ou choisir un autre jour</label><input type="date" id="freeDatePick" value="'+editDate+'" max="'+today+'"></div>' +
+      '<div class="grid2">' +
+        '<div><label>Matin début</label><input type="time" id="mD" value="'+(current.matinDebut||(isToday?'06:00':''))+'"'+dis+'></div>' +
+        '<div><label>Matin fin</label><input type="time" id="mF" value="'+(current.matinFin||'')+'"'+dis+'></div>' +
+      '</div>' +
+      '<div class="grid2">' +
+        '<div><label>Après-midi début</label><input type="time" id="aD" value="'+(current.apremDebut||'')+'"'+dis+'></div>' +
+        '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"'+dis+'></div>' +
+      '</div>' +
+      '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"'+dis+'></div>' +
+      '<div><label>Commentaire (facultatif)</label><textarea id="commentaire" rows="2" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:#FBFAF6;color:var(--ink);font-family:inherit;"'+dis+'>'+(current.commentaire||'')+'</textarea></div>' +
+      '<div class="total-line"><span>Total du jour</span><span class="val" id="liveTotal">—</span></div>' +
+      (lockedMonth ? '' : '<button class="btn btn-gold" id="btnSave">Enregistrer</button>') +
+      (isToday ? '' : '<button class="btn btn-ghost" id="btnCancelEdit">Annuler, revenir à aujourd\'hui</button>') +
+    '</div>';
+
+  var histDates = Object.keys(entries).filter(function(d){return d!==today;}).sort().reverse().slice(0,10);
+  if(histDates.length){
+    html += '<div class="section-title">Jours précédents — appuie pour modifier</div><div class="card">';
+    histDates.forEach(function(d){
+      var e = entries[d];
+      var t = computeTotal(e);
+      var edited = e.history && e.history.length > 0;
+      var isLocked = !!validations[d.slice(0,7)];
+      if(isLocked){
+        html += '<div class="hist-item"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' 🔒</span></div>';
+      } else {
+        html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+(e.commentaire?' 💬':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
+      }
+    });
+    html += '</div>';
+  }
+
+  app.innerHTML = html;
+
+  document.getElementById('freeDatePick').addEventListener('change', function(){
+    state.editDate = (this.value === today) ? null : this.value;
+    renderWorkerDash();
+  });
+
+  function updateLive(){
+    var e = {
+      matinDebut: document.getElementById('mD').value,
+      matinFin: document.getElementById('mF').value,
+      apremDebut: document.getElementById('aD').value,
+      apremFin: document.getElementById('aF').value,
+      pause: document.getElementById('pause').value
+    };
+    var t = computeTotal(e);
+    document.getElementById('liveTotal').textContent = t!==null ? t+' h' : '—';
+  }
+  ['mD','mF','aD','aF','pause'].forEach(function(id){
+    document.getElementById(id).addEventListener('input', updateLive);
+  });
+  updateLive();
+
+  document.querySelectorAll('.hist-item[data-date]').forEach(function(row){
+    row.addEventListener('click', function(){
+      state.editDate = row.getAttribute('data-date');
+      renderWorkerDash();
+    });
+  });
+
+  var cancelBtn = document.getElementById('btnCancelEdit');
+  if(cancelBtn){
+    cancelBtn.onclick = function(){ state.editDate = null; renderWorkerDash(); };
+  }
+
+  var btnSaveEl = document.getElementById('btnSave');
+  if(btnSaveEl) btnSaveEl.onclick = async function(){
+    var e = {
+      matinDebut: document.getElementById('mD').value,
+      matinFin: document.getElementById('mF').value,
+      apremDebut: document.getElementById('aD').value,
+      apremFin: document.getElementById('aF').value,
+      pause: document.getElementById('pause').value,
+      commentaire: document.getElementById('commentaire').value
+    };
+    if(!e.matinDebut || !e.matinFin){
+      alert('Renseigne au moins l\'heure de début et de fin du matin.');
+      return;
+    }
+    var now = new Date().toISOString();
+    var existing = entries[editDate];
+    if(existing && (existing.matinDebut || existing.matinFin || existing.apremDebut || existing.apremFin)){
+      var hist = existing.history || [];
+      hist.push({
+        matinDebut: existing.matinDebut||'', matinFin: existing.matinFin||'',
+        apremDebut: existing.apremDebut||'', apremFin: existing.apremFin||'',
+        pause: existing.pause!==undefined?existing.pause:'', total: computeTotal(existing),
+        remplaceLe: now
+      });
+      e.history = hist;
+    } else if(existing && existing.history){
+      e.history = existing.history;
+    }
+    e.modifieLe = now;
+    entries[editDate] = e;
+    await saveEntries(state.worker.id, entries);
+    alert('Heures bien enregistrées pour le ' + frDate(editDate) + ' : ' + computeTotal(e) + ' h.');
+    state.editDate = null;
+    renderWorkerDash();
+  };
+}
+
+async function renderWorkerRapport(){
+  headerTitle.textContent = 'Rapport';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var entries = await getEntries(state.worker.id);
+  var validations = await getValidations(state.worker.id);
+  var today = todayISO();
+  var currentYm = today.slice(0,7);
+
+  var monthTotals = {};
+  Object.keys(entries).forEach(function(d){
+    var t = computeTotal(entries[d]);
+    if(t){
+      var ym = d.slice(0,7);
+      monthTotals[ym] = round2((monthTotals[ym]||0) + t);
+    }
+  });
+  var months = Object.keys(monthTotals).sort().reverse();
+  var html = '';
+  if(!months.length){
+    html = '<p class="muted">Aucune heure enregistrée pour l\'instant.</p>';
+  } else {
+    var moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+    html += '<div class="card">';
+    months.forEach(function(ym){
+      var parts = ym.split('-');
+      var label = moisNoms[parseInt(parts[1],10)-1] + ' ' + parts[0];
+      var isOpen = state.expandedMonth === ym;
+      var v = validations[ym];
+      html += '<div class="hist-item" data-month="'+ym+'" style="cursor:pointer;"><span class="hist-date">'+label+(v?' 🔒':'')+'</span><span class="hist-total">'+monthTotals[ym]+' h &nbsp;'+(isOpen?'−':'+')+'</span></div>';
+      if(isOpen){
+        var daysInMonth = Object.keys(entries).filter(function(d){return d.slice(0,7)===ym;}).sort().reverse();
+        html += '<div style="padding:4px 0 8px 10px;">';
+        daysInMonth.forEach(function(d){
+          var t = computeTotal(entries[d]);
+          if(v){
+            html += '<div class="hist-item" style="padding:8px 0;"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' 🔒</span></div>';
+          } else {
+            html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;padding:8px 0;"><span class="hist-date">'+frDate(d)+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+' ✎</span></div>';
+          }
+        });
+        html += '</div>';
+        if(v){
+          html += '<div style="padding:10px;background:var(--green-bg);border-radius:9px;margin:0 0 10px;font-size:13px;color:var(--moss-dark);">✓ Mois validé par '+v.prenom+' le '+new Date(v.validatedAt).toLocaleString('fr-FR')+' — '+v.totalHeures+' h.</div>';
+        } else if(ym !== currentYm){
+          html += '<div style="padding:0 0 10px;"><button class="btn btn-gold" data-validate="'+ym+'">Valider et signer ce mois ('+monthTotals[ym]+' h)</button></div>';
+        } else {
+          html += '<div style="padding:0 0 10px;"><p class="muted">Le mois en cours ne peut être validé qu\'une fois terminé.</p></div>';
+        }
+      }
+    });
+    html += '</div>';
+  }
+  app.innerHTML = html;
+
+  document.querySelectorAll('.hist-item[data-month]').forEach(function(row){
+    row.addEventListener('click', function(){
+      var ym = row.getAttribute('data-month');
+      state.expandedMonth = (state.expandedMonth === ym) ? null : ym;
+      renderWorkerRapport();
+    });
+  });
+  document.querySelectorAll('.hist-item[data-date]').forEach(function(row){
+    row.addEventListener('click', function(){
+      state.editDate = row.getAttribute('data-date');
+      state.screen = 'workerDash';
+      render();
+    });
+  });
+  document.querySelectorAll('button[data-validate]').forEach(function(btn){
+    btn.onclick = async function(){
+      var ym = btn.getAttribute('data-validate');
+      var parts = ym.split('-');
+      var moisNoms2 = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+      var label = moisNoms2[parseInt(parts[1],10)-1] + ' ' + parts[0];
+      var saisie = prompt('Pour valider et signer '+label+' ('+monthTotals[ym]+' h), tape ton prénom exact ci-dessous :');
+      if(!saisie) return;
+      if(normalize(saisie) !== normalize(state.worker.prenom)){
+        alert('Le prénom ne correspond pas, validation annulée.');
+        return;
+      }
+      var current = await getValidations(state.worker.id);
+      current[ym] = { validatedAt: new Date().toISOString(), prenom: state.worker.prenom, totalHeures: monthTotals[ym] };
+      await saveValidations(state.worker.id, current);
+      alert('Mois validé et signé.');
+      renderWorkerRapport();
+    };
+  });
+}
+
+async function renderWorkerDocs(){
+  headerTitle.textContent = 'Documents';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var docs = await getDocuments(state.worker.id);
+  docs = docs.slice().sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); });
+
+  var html = '';
+  if(!docs.length){
+    html = '<p class="muted">Aucun document disponible pour l\'instant.</p>';
+  } else {
+    html += '<div class="card">';
+    docs.forEach(function(d){
+      var dateStr = d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString('fr-FR') : '';
+      html += '<div class="doc-item"><span>'+d.name+'<br><span class="muted">'+dateStr+'</span></span><a class="btn btn-ghost" style="width:auto;padding:8px 14px;" download="'+d.name+'" href="data:'+d.type+';base64,'+d.data+'">Télécharger</a></div>';
+    });
+    html += '</div>';
+  }
+  app.innerHTML = html;
+}
+
+function renderWorkerParams(){
+  headerTitle.textContent = 'Paramètres';
+  app.innerHTML =
+    '<div class="card stack">' +
+      '<div><label>Prénom</label><input type="text" id="pPrenom" value="'+state.worker.prenom+'" disabled></div>' +
+      '<div><label>Email pour le récap hebdomadaire</label><input type="text" id="pEmail" value="'+(state.worker.email||'')+'"></div>' +
+      '<div id="paramsMsg" class="banner ok hidden">Informations mises à jour.</div>' +
+      '<button class="btn btn-primary" id="btnSaveEmail">Enregistrer</button>' +
+      '<button class="btn btn-ghost" id="btnLogoutParams">Se déconnecter</button>' +
+    '</div>';
+  document.getElementById('btnSaveEmail').onclick = async function(){
+    var email = document.getElementById('pEmail').value.trim();
+    var workers = await getWorkers();
+    var w = workers.find(function(x){ return x.id === state.worker.id; });
+    if(w){ w.email = email; await saveWorkers(workers); state.worker = w; }
+    var msg = document.getElementById('paramsMsg');
+    msg.classList.remove('hidden');
+  };
+  document.getElementById('btnLogoutParams').onclick = function(){
+    state = { screen:'home', worker:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null };
+    render();
+  };
+}
+
+async function renderSorterEntry(){
+  headerTitle.textContent = 'Tri — barquettes';
+  var date = state.sorterDate || todayISO();
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var list = await getBarquettes(date);
+  var editIdx = state.sorterEditIdx;
+  var editing = (editIdx !== null && editIdx !== undefined && list[editIdx]);
+
+  var totalBarq = list.reduce(function(s,e){ return s + (parseInt(e.barquettes,10)||0); }, 0);
+  var totalKg = round2(totalBarq * 0.125);
+
+  var html =
+    '<div class="card stack">' +
+      '<div><label>Date</label><input type="date" id="sorterDatePick" value="'+date+'" max="'+todayISO()+'"'+(editing?' disabled':'')+'></div>' +
+      (editing ? '<p class="muted">Modification de la saisie sélectionnée.</p>' : '') +
+      '<button class="btn btn-primary" id="btnScanQR">📷 Scanner le QR du cueilleur</button>' +
+      '<div class="grid2">' +
+        '<div><label>N° cueilleur (1-56)</label><input type="number" id="cNum" min="1" max="56" placeholder="Ex: 12" value="'+(editing?list[editIdx].cueilleurNum:'')+'"></div>' +
+        '<div><label>Nombre de barquettes</label><input type="number" id="cBarq" min="1" placeholder="Ex: 8" value="'+(editing?list[editIdx].barquettes:'')+'"></div>' +
+      '</div>' +
+      '<button class="btn btn-gold" id="btnAddBarq">'+(editing?'Enregistrer la modification':'Ajouter')+'</button>' +
+      (editing ? '<button class="btn btn-ghost" id="btnCancelEditBarq">Annuler</button>' : '') +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="total-line" style="border-top:none;padding-top:0;"><span>Total du jour</span><span class="val">'+totalBarq+' barquettes (~'+totalKg+' kg)</span></div>' +
+    '</div>';
+
+  if(list.length){
+    html += '<div class="section-title">Saisies du jour ('+list.length+')</div><div class="card">';
+    list.slice().reverse().forEach(function(e, revIdx){
+      var idx = list.length - 1 - revIdx;
+      var heure = e.timestamp ? new Date(e.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : '';
+      html += '<div class="hist-item"><span class="hist-date">Cueilleur n°'+e.cueilleurNum+' — '+e.barquettes+' barquette(s)<br><span class="muted">'+heure+' par '+e.sorterPrenom+'</span></span><span><button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-editidx="'+idx+'">✎</button> <button class="btn btn-ghost" style="width:auto;padding:6px 10px;color:var(--red);" data-delidx="'+idx+'">✕</button></span></div>';
+    });
+    html += '</div>';
+  }
+
+  app.innerHTML = html;
+
+  document.getElementById('btnScanQR').onclick = function(){
+    openScanner(function(data){
+      var num = parseInt(data, 10);
+      if(!num || num<1 || num>56){
+        alert('QR code non reconnu comme numéro de cueilleur valide (lu : "'+data+'").');
+        return;
+      }
+      document.getElementById('cNum').value = num;
+      document.getElementById('cBarq').focus();
+    });
+  };
+
+  document.getElementById('sorterDatePick').addEventListener('change', function(){
+    state.sorterDate = this.value;
+    state.sorterEditIdx = null;
+    renderSorterEntry();
+  });
+
+  var cancelEditBtn = document.getElementById('btnCancelEditBarq');
+  if(cancelEditBtn){
+    cancelEditBtn.onclick = function(){ state.sorterEditIdx = null; renderSorterEntry(); };
+  }
+
+  document.getElementById('btnAddBarq').onclick = async function(){
+    var num = parseInt(document.getElementById('cNum').value, 10);
+    var barq = parseInt(document.getElementById('cBarq').value, 10);
+    if(!num || num<1 || num>56){ alert('Numéro de cueilleur invalide (1 à 56).'); return; }
+    if(!barq || barq<1){ alert('Renseigne un nombre de barquettes.'); return; }
+    var current = await getBarquettes(date);
+    if(editing){
+      current[editIdx].cueilleurNum = num;
+      current[editIdx].barquettes = barq;
+      current[editIdx].modifieLe = new Date().toISOString();
+    } else {
+      current.push({ cueilleurNum: num, barquettes: barq, sorterWorkerId: state.worker.id, sorterPrenom: state.worker.prenom, timestamp: new Date().toISOString() });
+    }
+    var ok = await saveBarquettes(date, current);
+    if(!ok){ alert('Erreur : l\'enregistrement a échoué. Vérifie ta connexion et réessaie.'); return; }
+    state.sorterEditIdx = null;
+    renderSorterEntry();
+  };
+
+  document.querySelectorAll('button[data-editidx]').forEach(function(btn){
+    btn.onclick = function(){
+      state.sorterEditIdx = parseInt(btn.getAttribute('data-editidx'), 10);
+      renderSorterEntry();
+    };
+  });
+
+  document.querySelectorAll('button[data-delidx]').forEach(function(btn){
+    btn.onclick = async function(){
+      var idx = parseInt(btn.getAttribute('data-delidx'), 10);
+      var current = await getBarquettes(date);
+      current.splice(idx, 1);
+      var ok = await saveBarquettes(date, current);
+      if(!ok){ alert('Erreur lors de la suppression. Réessaie.'); return; }
+      state.sorterEditIdx = null;
+      renderSorterEntry();
+    };
+  });
+}
+
+function renderAdminLogin(){
+  headerTitle.textContent = 'Espace responsable';
+  app.innerHTML =
+    '<div class="card stack">' +
+      '<div><label>Code responsable</label><input type="password" id="fCode" placeholder="Code"></div>' +
+      '<div id="adminErr" class="banner hidden"></div>' +
+      '<button class="btn btn-primary" id="btnAdminLogin">Entrer</button>' +
+    '</div>';
+  document.getElementById('btnAdminLogin').onclick = function(){
+    var code = document.getElementById('fCode').value;
+    if(code !== ADMIN_CODE){
+      var el = document.getElementById('adminErr');
+      el.textContent = 'Code incorrect.';
+      el.classList.remove('hidden');
+      return;
+    }
+    state.screen = 'adminDash';
+    render();
+  };
+}
+
+async function renderAdminDash(){
+  headerTitle.textContent = 'Équipe';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+
+  var totalsHtml = '';
+  var allData = [];
+  var mods = [];
+  for(var i=0;i<workers.length;i++){
+    var w = workers[i];
+    var entries = await getEntries(w.id);
+    var totalH = 0;
+    var days = Object.keys(entries);
+    days.forEach(function(d){
+      var entry = entries[d];
+      var t = computeTotal(entry);
+      if(t) totalH += t;
+      if(entry.history && entry.history.length){
+        entry.history.forEach(function(h){
+          mods.push({ prenom: w.prenom, jour: d, ancienTotal: h.total, nouveauTotal: computeTotal(entry), quand: h.remplaceLe });
+        });
+      }
+    });
+    allData.push({worker:w, entries:entries, totalH: round2(totalH)});
+    totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalH)+' h ›</span></div>';
+  }
+
+  if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; }
+
+  var docStatusHtml = '';
+  var moisNomsDoc = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  for(var k=0;k<workers.length;k++){
+    var dw = workers[k];
+    var wdocs = await getDocuments(dw.id);
+    var wentries = await getEntries(dw.id);
+
+    var monthsWorked = {};
+    Object.keys(wentries).forEach(function(d){
+      var t = computeTotal(wentries[d]);
+      if(t) monthsWorked[d.slice(0,7)] = true;
+    });
+    var monthKeys = Object.keys(monthsWorked).sort();
+
+    var docMonthLabels = {};
+    wdocs.forEach(function(doc){ if(doc.periodLabel) docMonthLabels[doc.periodLabel] = true; });
+
+    docStatusHtml += '<div class="worker-row" style="align-items:flex-start;"><span class="worker-name">'+dw.prenom+'</span>';
+    if(!monthKeys.length){
+      docStatusHtml += '<span class="muted">aucune heure saisie</span></div>';
+    } else {
+      docStatusHtml += '<span style="text-align:right;">';
+      monthKeys.forEach(function(ym){
+        var parts = ym.split('-');
+        var label = moisNomsDoc[parseInt(parts[1],10)-1].normalize('NFD').replace(/[\u0300-\u036f]/g,'') + '-' + parts[0];
+        var displayLabel = moisNomsDoc[parseInt(parts[1],10)-1] + ' ' + parts[0];
+        var has = !!docMonthLabels[label];
+        docStatusHtml += '<span style="display:block;font-size:13px;color:'+(has?'var(--moss)':'var(--red)')+';">'+(has?'✓':'✗')+' '+displayLabel+'</span>';
+      });
+      docStatusHtml += '</span></div>';
+    }
+  }
+  if(!workers.length) docStatusHtml = '<p class="muted">Aucun salarié pour l\'instant.</p>';
+
+  mods.sort(function(a,b){ return (b.quand||'').localeCompare(a.quand||''); });
+  var modsHtml = '';
+  if(mods.length){
+    mods.forEach(function(m){
+      var quandStr = m.quand ? new Date(m.quand).toLocaleString('fr-FR') : '—';
+      modsHtml += '<div class="hist-item"><span class="hist-date">'+m.prenom+' — '+frDate(m.jour)+'</span><span class="muted" style="font-size:12px;">'+(m.ancienTotal!==null?m.ancienTotal+'h':'—')+' → '+(m.nouveauTotal!==null?m.nouveauTotal+'h':'—')+'<br>'+quandStr+'</span></div>';
+    });
+  } else { modsHtml = '<p class="muted">Aucune modification enregistrée.</p>'; }
+
+  app.innerHTML =
+    '<div class="card">' +
+      '<div class="section-title" style="margin-top:0;">Total par salarié</div>' +
+      totalsHtml +
+    '</div>' +
+    '<button class="btn btn-gold" id="btnExport">Exporter en Excel</button>' +
+    '<button class="btn btn-ghost" id="btnBulkImport">Importer des documents en masse</button>' +
+    '<button class="btn btn-ghost" id="btnPayroll">Récap virements &amp; cotisations</button>' +
+    '<button class="btn btn-ghost" id="btnBarquettes">Suivi barquettes (tri)</button>' +
+    '<button class="btn btn-ghost" id="btnLabels">Étiquettes QR cueilleurs</button>' +
+    '<button class="btn btn-ghost" id="btnNewWorker">Créer un salarié</button>' +
+    '<button class="btn btn-ghost" id="btnImportHours">Importer une feuille d\'heures</button>' +
+    '<div class="section-title">Suivi des documents</div>' +
+    '<div class="card">' + docStatusHtml + '</div>' +
+    '<div class="link-row" id="btnResetInfo">Les identifiants sont : prénom + date de naissance donnés en début de saison.</div>' +
+    '<div class="section-title">Journal des modifications</div>' +
+    '<div class="card">' + modsHtml + '</div>';
+
+  document.getElementById('btnBulkImport').onclick = function(){
+    state.screen = 'adminBulkImport';
+    render();
+  };
+
+  document.getElementById('btnPayroll').onclick = function(){
+    state.screen = 'adminPayroll';
+    render();
+  };
+
+  document.getElementById('btnBarquettes').onclick = function(){
+    state.screen = 'adminBarquettes';
+    render();
+  };
+
+  document.getElementById('btnLabels').onclick = function(){
+    state.screen = 'adminLabels';
+    render();
+  };
+
+  document.getElementById('btnNewWorker').onclick = function(){
+    state.screen = 'adminNewWorker';
+    render();
+  };
+
+  document.getElementById('btnImportHours').onclick = function(){
+    state.screen = 'adminImportHours';
+    render();
+  };
+
+  document.getElementById('btnExport').onclick = function(){
+    exportExcel(allData, mods);
+  };
+
+  document.querySelectorAll('.worker-row[data-wid]').forEach(function(row){
+    row.addEventListener('click', function(){
+      state.adminWorkerId = row.getAttribute('data-wid');
+      state.adminEditDate = null;
+      state.screen = 'adminWorkerDetail';
+      render();
+    });
+  });
+}
+
+async function renderAdminWorkerDetail(){
+  var workers = await getWorkers();
+  var w = workers.find(function(x){ return x.id === state.adminWorkerId; });
+  if(!w){ state.screen='adminDash'; return render(); }
+  headerTitle.textContent = w.prenom;
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var entries = await getEntries(w.id);
+  var validations = await getValidations(w.id);
+  var editDate = state.adminEditDate || todayISO();
+  var current = entries[editDate] || {};
+  var wasEdited = current.history && current.history.length > 0;
+  var lockedMonth = validations[editDate.slice(0,7)] || null;
+
+  var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';
+  html += '<div class="card" style="display:flex;align-items:center;justify-content:space-between;">' +
+    '<span class="worker-name">Fait aussi du tri</span>' +
+    '<input type="checkbox" id="isTrieurCheck" style="width:22px;height:22px;"'+(w.isTrieur?' checked':'')+'>' +
+  '</div>';
+  if(lockedMonth){
+    html += '<div class="banner">Attention : ce mois a été validé et signé par '+lockedMonth.prenom+' le '+new Date(lockedMonth.validatedAt).toLocaleDateString('fr-FR')+'. Toute correction restera tracée dans l\'historique.</div>';
+  }
+  html +=
+    '<div class="card stack">' +
+      '<label style="margin-bottom:0;font-size:14px;color:var(--ink-soft);">Modifier — ' + frDate(editDate) + (wasEdited ? ' (déjà modifié '+current.history.length+' fois)' : '') + '</label>' +
+      '<div><label>Choisir un jour</label><input type="date" id="adminDatePick" value="'+editDate+'"></div>' +
+      '<div class="grid2">' +
+        '<div><label>Matin début</label><input type="time" id="mD" value="'+(current.matinDebut||'')+'"></div>' +
+        '<div><label>Matin fin</label><input type="time" id="mF" value="'+(current.matinFin||'')+'"></div>' +
+      '</div>' +
+      '<div class="grid2">' +
+        '<div><label>Après-midi début</label><input type="time" id="aD" value="'+(current.apremDebut||'')+'"></div>' +
+        '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"></div>' +
+      '</div>' +
+      '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"></div>' +
+      '<div><label>Commentaire (facultatif)</label><textarea id="commentaire" rows="2" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:#FBFAF6;color:var(--ink);font-family:inherit;">'+(current.commentaire||'')+'</textarea></div>' +
+      '<div class="total-line"><span>Total du jour</span><span class="val" id="liveTotal">—</span></div>' +
+      '<button class="btn btn-gold" id="btnSave">Enregistrer la correction</button>' +
+    '</div>';
+
+  var allDates = Object.keys(entries).sort().reverse();
+  if(allDates.length){
+    html += '<div class="section-title">Tous les jours saisis — appuie pour modifier</div><div class="card">';
+    allDates.forEach(function(d){
+      var e = entries[d];
+      var t = computeTotal(e);
+      var edited = e.history && e.history.length > 0;
+      html += '<div class="hist-item" data-date="'+d+'" style="cursor:pointer;"><span class="hist-date">'+frDate(d)+(edited?' <span class="muted">(modifié)</span>':'')+(e.commentaire?' 💬':'')+'</span><span class="hist-total">'+(t!==null?t+' h':'—')+'</span></div>';
+    });
+    html += '</div>';
+  }
+
+  html += '<button class="btn" id="btnDeleteWorker" style="background:var(--red);color:#fff;margin-top:8px;">Supprimer ce salarié</button>';
+
+  app.innerHTML = html;
+
+  var docs = await getDocuments(w.id);
+  var docsHtml = '<div class="section-title">Documents (feuilles de paie, etc.)</div><div class="card stack">';
+  docsHtml += '<div><label>Ajouter un document</label><input type="file" id="docFile"></div>';
+  docsHtml += '<button class="btn btn-primary" id="btnUploadDoc">Ajouter</button>';
+  if(docs.length){
+    docsHtml += '<div style="margin-top:10px;">';
+    docs.slice().sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); }).forEach(function(d){
+      var dateStr = d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString('fr-FR') : '';
+      docsHtml += '<div class="doc-item"><span>'+d.name+'<br><span class="muted">'+dateStr+'</span></span><button class="btn btn-ghost" style="width:auto;padding:8px 14px;color:var(--red);" data-delid="'+d.id+'">Supprimer</button></div>';
+    });
+    docsHtml += '</div>';
+  } else {
+    docsHtml += '<p class="muted" style="margin-top:6px;">Aucun document pour ce salarié.</p>';
+  }
+  docsHtml += '</div>';
+  app.insertAdjacentHTML('beforeend', docsHtml);
+
+  document.getElementById('btnUploadDoc').onclick = async function(){
+    var fileInput = document.getElementById('docFile');
+    var file = fileInput.files[0];
+    if(!file){ alert('Choisis un fichier d\'abord.'); return; }
+    var periodLabel = null;
+    var payroll = { netAPayer: null, cotisations: null, heuresBulletin: null };
+    if(file.type === 'application/pdf' && window.pdfjsLib){
+      var text = await extractPdfText(file);
+      if(text){ periodLabel = extractPeriodLabel(text); payroll = extractPayrollInfo(text); }
+    }
+    if(!periodLabel){
+      var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+      var now = new Date();
+      periodLabel = moisNoms[now.getMonth()] + '-' + now.getFullYear();
+    }
+    var ext = file.name.split('.').pop();
+    var niceName = 'Bulletin_'+w.prenom+'_'+periodLabel+'.'+ext;
+    var base64 = await fileToBase64(file);
+    var current = await getDocuments(w.id);
+    current.push({ id: 'doc-'+Date.now(), name: niceName, type: file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString(), periodLabel: periodLabel, netAPayer: payroll.netAPayer, cotisations: payroll.cotisations, heuresBulletin: payroll.heuresBulletin });
+    await saveDocuments(w.id, current);
+    renderAdminWorkerDetail();
+  };
+  document.querySelectorAll('button[data-delid]').forEach(function(btn){
+    btn.onclick = async function(){
+      var id = btn.getAttribute('data-delid');
+      var current = await getDocuments(w.id);
+      current = current.filter(function(d){ return d.id !== id; });
+      await saveDocuments(w.id, current);
+      renderAdminWorkerDetail();
+    };
+  });
+
+  document.getElementById('btnDeleteWorker').onclick = async function(){
+    var sure = confirm('Supprimer définitivement '+w.prenom+' et toutes ses heures enregistrées ? Cette action est irréversible.');
+    if(!sure) return;
+    var updated = workers.filter(function(x){ return x.id !== w.id; });
+    await saveWorkers(updated);
+    await saveEntries(w.id, {});
+    await saveDocuments(w.id, []);
+    state.screen = 'adminDash';
+    render();
+  };
+
+  document.getElementById('isTrieurCheck').addEventListener('change', async function(){
+    w.isTrieur = this.checked;
+    await saveWorkers(workers);
+  });
+
+  document.getElementById('btnBackAdmin').onclick = function(){
+    state.screen = 'adminDash';
+    render();
+  };
+
+  document.getElementById('adminDatePick').addEventListener('change', function(){
+    state.adminEditDate = this.value;
+    renderAdminWorkerDetail();
+  });
+
+  function updateLive(){
+    var e = {
+      matinDebut: document.getElementById('mD').value,
+      matinFin: document.getElementById('mF').value,
+      apremDebut: document.getElementById('aD').value,
+      apremFin: document.getElementById('aF').value,
+      pause: document.getElementById('pause').value
+    };
+    var t = computeTotal(e);
+    document.getElementById('liveTotal').textContent = t!==null ? t+' h' : '—';
+  }
+  ['mD','mF','aD','aF','pause'].forEach(function(id){
+    document.getElementById(id).addEventListener('input', updateLive);
+  });
+  updateLive();
+
+  document.querySelectorAll('.hist-item[data-date]').forEach(function(row){
+    row.addEventListener('click', function(){
+      state.adminEditDate = row.getAttribute('data-date');
+      renderAdminWorkerDetail();
+    });
+  });
+
+  document.getElementById('btnSave').onclick = async function(){
+    var e = {
+      matinDebut: document.getElementById('mD').value,
+      matinFin: document.getElementById('mF').value,
+      apremDebut: document.getElementById('aD').value,
+      apremFin: document.getElementById('aF').value,
+      pause: document.getElementById('pause').value,
+      commentaire: document.getElementById('commentaire').value
+    };
+    if(!e.matinDebut || !e.matinFin){
+      alert('Renseigne au moins l\'heure de début et de fin du matin.');
+      return;
+    }
+    var now = new Date().toISOString();
+    var existing = entries[editDate];
+    if(existing && (existing.matinDebut || existing.matinFin || existing.apremDebut || existing.apremFin)){
+      var hist = existing.history || [];
+      hist.push({
+        matinDebut: existing.matinDebut||'', matinFin: existing.matinFin||'',
+        apremDebut: existing.apremDebut||'', apremFin: existing.apremFin||'',
+        pause: existing.pause!==undefined?existing.pause:'', total: computeTotal(existing),
+        remplaceLe: now, modifiePar: 'Responsable'
+      });
+      e.history = hist;
+    } else if(existing && existing.history){
+      e.history = existing.history;
+    }
+    e.modifieLe = now;
+    e.modifiePar = 'Responsable';
+    entries[editDate] = e;
+    await saveEntries(w.id, entries);
+    renderAdminWorkerDetail();
+  };
+}
+
+async function renderAdminBulkImport(){
+  headerTitle.textContent = 'Import en masse';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+
+  var optionsHtml = '<option value="">— non trouvé, choisir —</option>' +
+    workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
+
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackBulk">‹ Retour à l\'équipe</button>' +
+    '<div class="card stack">' +
+      '<div><label>Sélectionner les fichiers (plusieurs à la fois)</label><input type="file" id="bulkFiles" multiple></div>' +
+      '<p class="muted">Astuce : nomme les fichiers avec le prénom du salarié (ex: Bulletin_Marie_Juillet.pdf) pour une reconnaissance automatique.</p>' +
+    '</div>' +
+    '<div id="bulkList"></div>';
+
+  document.getElementById('btnBackBulk').onclick = function(){ state.screen='adminDash'; render(); };
+
+  document.getElementById('bulkFiles').addEventListener('change', async function(e){
+    var files = Array.from(e.target.files);
+    document.getElementById('bulkList').innerHTML = '<p class="muted">Analyse des fichiers en cours…</p>';
+
+    var detections = [];
+    for(var i=0;i<files.length;i++){
+      var file = files[i];
+      var match = null;
+      var periodLabel = null;
+      var payroll = { netAPayer: null, cotisations: null, heuresBulletin: null };
+      if(file.type === 'application/pdf' && window.pdfjsLib){
+        var text = await extractPdfText(file);
+        if(text){
+          match = findWorkerInText(text, workers);
+          periodLabel = extractPeriodLabel(text);
+          payroll = extractPayrollInfo(text);
+        }
+      }
+      if(!match){
+        var nameNorm = normalize(file.name);
+        match = workers.find(function(w){ return w.key && nameNorm.indexOf(w.key) !== -1; });
+      }
+      detections.push({ file: file, match: match, periodLabel: periodLabel, payroll: payroll });
+    }
+
+    var rowsHtml = detections.map(function(d, i){
+      var opts = optionsHtml.replace('value="'+(d.match?d.match.id:'__none__')+'"', 'value="'+(d.match?d.match.id:'')+'" selected');
+      return '<div class="doc-item" style="align-items:center;">' +
+        '<span style="flex:1;">'+d.file.name+(d.match?' <span class="muted">→ '+d.match.prenom+'</span>':'')+'</span>' +
+        '<select data-fileidx="'+i+'" style="max-width:140px;padding:8px;border-radius:8px;border:1px solid var(--line);">' +
+          opts +
+        '</select>' +
+      '</div>';
+    }).join('');
+
+    document.getElementById('bulkList').innerHTML =
+      '<div class="card">' + rowsHtml + '</div>' +
+      '<button class="btn btn-gold" id="btnDoImport">Importer '+files.length+' document(s)</button>' +
+      '<div id="bulkResult" class="muted" style="text-align:center;margin-top:8px;"></div>';
+
+    document.getElementById('btnDoImport').onclick = async function(){
+      var selects = document.querySelectorAll('select[data-fileidx]');
+      var byWorker = {};
+      var skipped = 0;
+      for(var i=0;i<selects.length;i++){
+        var wid = selects[i].value;
+        var d = detections[i];
+        if(!wid){ skipped++; continue; }
+        if(!byWorker[wid]) byWorker[wid] = [];
+        byWorker[wid].push(d);
+      }
+      var resultEl = document.getElementById('bulkResult');
+      resultEl.textContent = 'Import en cours…';
+      var count = 0;
+      for(var wid in byWorker){
+        var current = await getDocuments(wid);
+        var worker = workers.find(function(w){ return w.id === wid; });
+        for(var j=0;j<byWorker[wid].length;j++){
+          var d = byWorker[wid][j];
+          var base64 = await fileToBase64(d.file);
+          var ext = d.file.name.split('.').pop();
+          var pLabel = d.periodLabel;
+          if(!pLabel){
+            var moisNoms2 = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+            var now2 = new Date();
+            pLabel = moisNoms2[now2.getMonth()] + '-' + now2.getFullYear();
+          }
+          var niceName = worker ? 'Bulletin_'+worker.prenom+'_'+pLabel+'.'+ext : d.file.name;
+          current.push({ id: 'doc-'+Date.now()+'-'+j, name: niceName, type: d.file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString(), periodLabel: pLabel, netAPayer: d.payroll.netAPayer, cotisations: d.payroll.cotisations, heuresBulletin: d.payroll.heuresBulletin });
+          count++;
+        }
+        await saveDocuments(wid, current);
+      }
+      resultEl.textContent = count + ' document(s) importé(s)' + (skipped ? ', ' + skipped + ' ignoré(s) (pas de salarié choisi)' : '') + '.';
+    };
+  });
+}
+
+async function renderAdminPayroll(){
+  headerTitle.textContent = 'Virements & cotisations';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+
+  var rows = [];
+  var totalNet = 0, totalCot = 0;
+  for(var i=0;i<workers.length;i++){
+    var w = workers[i];
+    var docs = await getDocuments(w.id);
+    var withPay = docs.filter(function(d){ return d.netAPayer !== null && d.netAPayer !== undefined; });
+    withPay.sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); });
+    var latest = withPay[0] || null;
+
+    var entries = await getEntries(w.id);
+    var heuresMois = null;
+    if(latest && latest.periodLabel){
+      var parts = latest.periodLabel.split('-');
+      var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+      var mi = moisNoms.indexOf(parts[0]);
+      if(mi !== -1){
+        var ym = parts[1] + '-' + String(mi+1).padStart(2,'0');
+        heuresMois = 0;
+        Object.keys(entries).forEach(function(d){ if(d.slice(0,7)===ym){ var t=computeTotal(entries[d]); if(t) heuresMois += t; } });
+        heuresMois = round2(heuresMois);
+      }
+    }
+
+    if(latest){ totalNet += latest.netAPayer||0; totalCot += latest.cotisations||0; }
+    rows.push({ prenom: w.prenom, doc: latest, heuresMois: heuresMois });
+  }
+  totalNet = round2(totalNet); totalCot = round2(totalCot);
+
+  var html = '<p class="muted" style="margin-bottom:14px;">Montants extraits automatiquement des derniers bulletins importés pour chaque salarié — à vérifier avant tout virement, l\'extraction peut se tromper selon la mise en page du bulletin.</p>';
+  html += '<div class="card">';
+  rows.forEach(function(r){
+    if(!r.doc){
+      html += '<div class="worker-row"><span class="worker-name">'+r.prenom+'</span><span class="muted">aucun bulletin importé</span></div>';
+    } else {
+      html += '<div class="worker-row" style="align-items:flex-start;">' +
+        '<span class="worker-name">'+r.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+(r.doc.periodLabel||'')+(r.heuresMois!==null?' — '+r.heuresMois+' h (app)':'')+(r.doc.heuresBulletin?' / '+r.doc.heuresBulletin+' h (bulletin)':'')+'</span></span>' +
+        '<span style="text-align:right;">' +
+          '<span class="worker-hours" style="display:block;">'+(r.doc.netAPayer!==null?r.doc.netAPayer+' €':'—')+'</span>' +
+          '<span class="muted" style="font-size:12px;">cotis. '+(r.doc.cotisations!==null?r.doc.cotisations+' €':'—')+'</span>' +
+        '</span>' +
+      '</div>';
+    }
+  });
+  html += '</div>';
+
+  html += '<div class="card">' +
+    '<div class="worker-row"><span class="worker-name">Total à virer</span><span class="worker-hours">'+totalNet+' €</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Total cotisations (MSA et autres)</span><span class="worker-hours">'+totalCot+' €</span></div>' +
+  '</div>';
+
+  html += '<button class="btn btn-gold" id="btnExportPayroll">Exporter en Excel</button>';
+  html += '<button class="btn btn-ghost" id="btnBackPayroll">‹ Retour à l\'équipe</button>';
+
+  app.innerHTML = html;
+
+  document.getElementById('btnBackPayroll').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnExportPayroll').onclick = function(){
+    var wb = XLSX.utils.book_new();
+    var data = [['Prénom','Période','Heures (app)','Heures (bulletin)','Net à virer (€)','Cotisations (€)']];
+    rows.forEach(function(r){
+      data.push([r.prenom, r.doc?r.doc.periodLabel||'':'', r.heuresMois!==null?r.heuresMois:'', r.doc?r.doc.heuresBulletin||'':'', r.doc?r.doc.netAPayer||'':'', r.doc?r.doc.cotisations||'':'']);
+    });
+    data.push([]);
+    data.push(['TOTAL','','','', totalNet, totalCot]);
+    var ws = XLSX.utils.aoa_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Virements');
+    XLSX.writeFile(wb, 'Virements_'+todayISO()+'.xlsx');
+  };
+}
+
+async function renderAdminBarquettes(){
+  headerTitle.textContent = 'Suivi barquettes';
+  var date = state.adminBarqDate || todayISO();
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var list = await getBarquettes(date);
+
+  var byCueilleur = {};
+  list.forEach(function(e){
+    byCueilleur[e.cueilleurNum] = (byCueilleur[e.cueilleurNum]||0) + (parseInt(e.barquettes,10)||0);
+  });
+  var cueilleurNums = Object.keys(byCueilleur).map(Number).sort(function(a,b){return a-b;});
+  var totalBarq = list.reduce(function(s,e){ return s + (parseInt(e.barquettes,10)||0); }, 0);
+  var totalKg = round2(totalBarq * 0.125);
+
+  var byTrieur = {};
+  list.forEach(function(e){
+    var k = e.sorterWorkerId || e.sorterPrenom;
+    if(!byTrieur[k]) byTrieur[k] = { workerId: e.sorterWorkerId||null, prenom: e.sorterPrenom, barq: 0 };
+    byTrieur[k].barq += (parseInt(e.barquettes,10)||0);
+  });
+  var trieurKeys = Object.keys(byTrieur);
+  for(var i=0;i<trieurKeys.length;i++){
+    var t = byTrieur[trieurKeys[i]];
+    t.kg = round2(t.barq * 0.125);
+    t.heures = null;
+    t.kgH = null;
+    if(t.workerId){
+      var wentries = await getEntries(t.workerId);
+      var jourEntry = wentries[date];
+      var h = jourEntry ? computeTotal(jourEntry) : null;
+      if(h){ t.heures = h; t.kgH = round2(t.kg / h); }
+    }
+  }
+
+  var html =
+    '<button class="btn btn-ghost" id="btnBackBarq">‹ Retour à l\'équipe</button>' +
+    '<div class="card stack" style="margin-top:14px;">' +
+      '<div><label>Date</label><input type="date" id="barqDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="worker-row"><span class="worker-name">Total barquettes</span><span class="worker-hours">'+totalBarq+'</span></div>' +
+      '<div class="worker-row"><span class="worker-name">Équivalent kg (x0,125)</span><span class="worker-hours">'+totalKg+' kg</span></div>' +
+      '<div class="worker-row"><span class="worker-name">Cueilleurs actifs</span><span class="worker-hours">'+cueilleurNums.length+'</span></div>' +
+    '</div>';
+
+  html += '<div class="section-title">Par trieur</div><div class="card">';
+  if(trieurKeys.length){
+    trieurKeys.forEach(function(k){
+      var t = byTrieur[k];
+      html += '<div class="worker-row" style="align-items:flex-start;">' +
+        '<span class="worker-name">'+t.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+t.barq+' barquettes — '+t.kg+' kg'+(t.heures!==null?' — '+t.heures+' h pointées':' — heures du jour non trouvées')+'</span></span>' +
+        '<span class="worker-hours">'+(t.kgH!==null?t.kgH+' kg/h':'—')+'</span>' +
+      '</div>';
+    });
+  } else {
+    html += '<p class="muted">Aucune saisie pour cette date.</p>';
+  }
+  html += '</div>';
+
+  if(cueilleurNums.length){
+    html += '<div class="section-title">Par cueilleur</div><div class="card">';
+    cueilleurNums.forEach(function(n){
+      html += '<div class="worker-row"><span class="worker-name">Cueilleur n°'+n+'</span><span class="worker-hours">'+byCueilleur[n]+' barquettes</span></div>';
+    });
+    html += '</div>';
+  }
+
+  html += '<button class="btn btn-gold" id="btnExportBarq">Exporter en Excel</button>';
+
+  app.innerHTML = html;
+
+  document.getElementById('btnBackBarq').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('barqDatePick').addEventListener('change', function(){
+    state.adminBarqDate = this.value;
+    renderAdminBarquettes();
+  });
+
+  document.getElementById('btnExportBarq').onclick = function(){
+    var wb = XLSX.utils.book_new();
+    var recap = [['Cueilleur n°','Total barquettes','Kg (x0,125)']];
+    cueilleurNums.forEach(function(n){ recap.push([n, byCueilleur[n], round2(byCueilleur[n]*0.125)]); });
+    recap.push([]);
+    recap.push(['TOTAL', totalBarq, totalKg]);
+    var wsRecap = XLSX.utils.aoa_to_sheet(recap);
+    XLSX.utils.book_append_sheet(wb, wsRecap, 'Récap cueilleurs');
+
+    var trieurRows = [['Trieur','Barquettes','Kg','Heures pointées','Kg/h']];
+    trieurKeys.forEach(function(k){
+      var t = byTrieur[k];
+      trieurRows.push([t.prenom, t.barq, t.kg, t.heures!==null?t.heures:'', t.kgH!==null?t.kgH:'']);
+    });
+    var wsTrieurs = XLSX.utils.aoa_to_sheet(trieurRows);
+    XLSX.utils.book_append_sheet(wb, wsTrieurs, 'Par trieur');
+
+    var detail = [['Cueilleur n°','Barquettes','Heure','Trieur']];
+    list.forEach(function(e){
+      var heure = e.timestamp ? new Date(e.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : '';
+      detail.push([e.cueilleurNum, e.barquettes, heure, e.sorterPrenom||'']);
+    });
+    var wsDetail = XLSX.utils.aoa_to_sheet(detail);
+    XLSX.utils.book_append_sheet(wb, wsDetail, 'Détail');
+
+    XLSX.writeFile(wb, 'Barquettes_'+date+'.xlsx');
+  };
+}
+
+function renderAdminLabels(){
+  headerTitle.textContent = 'Étiquettes QR';
+  var html =
+    '<div class="no-print">' +
+      '<button class="btn btn-ghost" id="btnBackLabels">‹ Retour à l\'équipe</button>' +
+      '<p class="muted" style="margin:10px 0;">56 étiquettes, une par cueilleur (1 à 56). Imprime, découpe et plastifie-les si besoin — chacune contient un QR code encodant simplement le numéro du cueilleur.</p>' +
+      '<button class="btn btn-gold" id="btnPrintLabels">Imprimer</button>' +
+    '</div>' +
+    '<div class="label-grid" id="labelGrid" style="margin-top:16px;"></div>';
+  app.innerHTML = html;
+
+  document.getElementById('btnBackLabels').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnPrintLabels').onclick = function(){ window.print(); };
+
+  var grid = document.getElementById('labelGrid');
+  for(var n=1; n<=56; n++){
+    var card = document.createElement('div');
+    card.className = 'label-card';
+    var qrDiv = document.createElement('div');
+    qrDiv.className = 'qr';
+    card.appendChild(qrDiv);
+    var numDiv = document.createElement('div');
+    numDiv.className = 'num';
+    numDiv.textContent = 'Cueilleur n°' + n;
+    card.appendChild(numDiv);
+    grid.appendChild(card);
+    if(window.QRCode){
+      new QRCode(qrDiv, { text: String(n), width: 110, height: 110, correctLevel: QRCode.CorrectLevel.M });
+    }
+  }
+}
+
+async function openScanner(onResult){
+  var overlay = document.createElement('div');
+  overlay.className = 'scanner-overlay';
+  overlay.innerHTML =
+    '<div class="scanner-bar"><span>Vise le QR code du cueilleur</span><button class="btn btn-ghost" id="btnCancelScan" style="width:auto;padding:8px 14px;color:#fff;border-color:#fff;">Annuler</button></div>' +
+    '<video id="scanVideo" playsinline autoplay></video>';
+  document.body.appendChild(overlay);
+
+  var video = document.getElementById('scanVideo');
+  var canvas = document.createElement('canvas');
+  var ctx = canvas.getContext('2d');
+  var stream = null;
+  var stopped = false;
+
+  function cleanup(){
+    stopped = true;
+    if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); }
+    if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+  document.getElementById('btnCancelScan').onclick = cleanup;
+
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  }catch(err){
+    alert('Impossible d\'accéder à la caméra : ' + err.message);
+    cleanup();
+    return;
+  }
+  video.srcObject = stream;
+
+  function tick(){
+    if(stopped) return;
+    if(video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      var code = window.jsQR ? jsQR(imageData.data, imageData.width, imageData.height) : null;
+      if(code && code.data){
+        cleanup();
+        onResult(code.data);
+        return;
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function renderAdminNewWorker(){
+  headerTitle.textContent = 'Créer un salarié';
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackNewWorker">‹ Retour à l\'équipe</button>' +
+    '<div class="card stack" style="margin-top:14px;">' +
+      '<div><label>Prénom</label><input type="text" id="nwPrenom" placeholder="Prénom"></div>' +
+      '<div><label>Date de naissance</label><input type="date" id="nwDob"></div>' +
+      '<div><label>Email (facultatif)</label><input type="text" id="nwEmail" placeholder="email@exemple.fr"></div>' +
+      '<div id="nwErr" class="banner hidden"></div>' +
+      '<button class="btn btn-gold" id="btnCreateWorker">Créer le compte</button>' +
+    '</div>';
+
+  document.getElementById('btnBackNewWorker').onclick = function(){ state.screen='adminDash'; render(); };
+
+  document.getElementById('btnCreateWorker').onclick = async function(){
+    var prenom = document.getElementById('nwPrenom').value.trim();
+    var dob = document.getElementById('nwDob').value;
+    var email = document.getElementById('nwEmail').value.trim();
+    var errEl = document.getElementById('nwErr');
+    if(!prenom || !dob){
+      errEl.textContent = 'Prénom et date de naissance obligatoires.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    var workers = await getWorkers();
+    var key = normalize(prenom);
+    if(workers.find(function(w){ return w.key===key; })){
+      errEl.textContent = 'Un salarié avec ce prénom existe déjà.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob, email:email };
+    workers.push(w);
+    await saveWorkers(workers);
+    alert('Compte créé pour '+prenom+'. Identifiants : prénom + date de naissance.');
+    state.screen = 'adminDash';
+    render();
+  };
+}
+
+async function renderAdminImportHours(){
+  headerTitle.textContent = 'Importer des heures';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+  var options = '<option value="">— choisir —</option>' + workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
+
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackImportH">‹ Retour à l\'équipe</button>' +
+    '<div class="card stack" style="margin-top:14px;">' +
+      '<p class="muted">Le fichier doit avoir une ligne d\'en-tête, puis une ligne par jour avec les colonnes dans cet ordre : Date (JJ/MM/AAAA ou AAAA-MM-JJ), Matin début (HH:MM), Matin fin, Après-midi début, Après-midi fin, Pause (minutes). Les cases vides sont acceptées pour l\'après-midi.</p>' +
+      '<div><label>Salarié</label><select id="ihWorker">'+options+'</select></div>' +
+      '<div><label>Fichier Excel</label><input type="file" id="ihFile" accept=".xlsx,.xls"></div>' +
+      '<button class="btn btn-gold" id="btnDoImportHours">Importer</button>' +
+      '<div id="ihResult" class="muted"></div>' +
+    '</div>';
+
+  document.getElementById('btnBackImportH').onclick = function(){ state.screen='adminDash'; render(); };
+
+  function parseDateCell(v){
+    if(v instanceof Date){
+      return v.toISOString().slice(0,10);
+    }
+    if(typeof v === 'number'){
+      var d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return d.toISOString().slice(0,10);
+    }
+    var s = String(v||'').trim();
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+    return null;
+  }
+  function parseTimeCell(v){
+    if(v===undefined || v===null || v==='') return '';
+    if(typeof v === 'number'){
+      var totalMin = Math.round(v*24*60);
+      var h = Math.floor(totalMin/60), mn = totalMin%60;
+      return String(h).padStart(2,'0')+':'+String(mn).padStart(2,'0');
+    }
+    var s = String(v).trim();
+    var m = s.match(/^(\d{1,2}):(\d{2})/);
+    if(m) return m[1].padStart(2,'0')+':'+m[2];
+    return '';
+  }
+
+  document.getElementById('btnDoImportHours').onclick = async function(){
+    var workerId = document.getElementById('ihWorker').value;
+    var file = document.getElementById('ihFile').files[0];
+    var resultEl = document.getElementById('ihResult');
+    if(!workerId || !file){ alert('Choisis un salarié et un fichier.'); return; }
+    resultEl.textContent = 'Lecture du fichier…';
+    try{
+      var buf = await file.arrayBuffer();
+      var wb = XLSX.read(buf, { type: 'array' });
+      var sheet = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+      var entries = await getEntries(workerId);
+      var count = 0, skipped = 0;
+      for(var i=1; i<rows.length; i++){
+        var row = rows[i] || [];
+        if(!row.length) continue;
+        var dateISO = parseDateCell(row[0]);
+        if(!dateISO){ skipped++; continue; }
+        var matinDebut = parseTimeCell(row[1]);
+        var matinFin = parseTimeCell(row[2]);
+        var apremDebut = parseTimeCell(row[3]);
+        var apremFin = parseTimeCell(row[4]);
+        var pause = row[5]!==undefined && row[5]!=='' ? parseFloat(row[5]) : 0;
+        if(!matinDebut || !matinFin){ skipped++; continue; }
+        var existing = entries[dateISO];
+        var e = { matinDebut:matinDebut, matinFin:matinFin, apremDebut:apremDebut, apremFin:apremFin, pause:pause, importeLe: new Date().toISOString() };
+        if(existing) e.history = existing.history || [];
+        entries[dateISO] = e;
+        count++;
+      }
+      var ok = await saveEntries(workerId, entries);
+      resultEl.textContent = count + ' jour(s) importé(s), ' + skipped + ' ligne(s) ignorée(s) (date ou heures manquantes).';
+    }catch(err){
+      resultEl.textContent = 'Erreur de lecture du fichier : ' + err.message;
+    }
+  };
+}
+
+function isoWeekKey(dateISO){
+  var d = new Date(dateISO+'T00:00:00');
+  var day = (d.getUTCDay()+6)%7; // lundi=0
+  d.setUTCDate(d.getUTCDate()-day+3);
+  var firstThursday = new Date(Date.UTC(d.getUTCFullYear(),0,4));
+  var week = 1 + Math.round(((d-firstThursday)/86400000 - 3 + ((firstThursday.getUTCDay()+6)%7))/7);
+  var monday = new Date(dateISO+'T00:00:00');
+  monday.setDate(monday.getDate() - ((monday.getDay()+6)%7));
+  return d.getUTCFullYear()+'-S'+String(week).padStart(2,'0')+'|'+monday.toISOString().slice(0,10);
+}
+function computeOvertimeWeeks(entries){
+  var byWeek = {};
+  Object.keys(entries).forEach(function(day){
+    var t = computeTotal(entries[day]);
+    if(!t) return;
+    var wk = isoWeekKey(day);
+    byWeek[wk] = round2((byWeek[wk]||0) + t);
+  });
+  var weeks = Object.keys(byWeek).sort();
+  return weeks.map(function(wk){
+    var total = byWeek[wk];
+    var normales = Math.min(total, 35);
+    var sup25 = Math.min(Math.max(total-35, 0), 8);
+    var sup50 = Math.max(total-43, 0);
+    var parts = wk.split('|');
+    return { semaine: parts[0], debutSemaine: parts[1], total: total, normales: round2(normales), sup25: round2(sup25), sup50: round2(sup50) };
+  });
+}
+
+function exportExcel(allData, mods){
+  var wb = XLSX.utils.book_new();
+  var recap = [['Prénom','Date de naissance','Total heures','Dont heures sup 125%','Dont heures sup 150%']];
+  var overtimeRows = [['Prénom','Semaine','Début de semaine','Total heures','Heures normales (≤35h)','Heures sup 125% (35-43h)','Heures sup 150% (>43h)']];
+  allData.forEach(function(d){
+    var weeks = computeOvertimeWeeks(d.entries);
+    var totalSup25 = 0, totalSup50 = 0;
+    weeks.forEach(function(w){
+      totalSup25 += w.sup25;
+      totalSup50 += w.sup50;
+      overtimeRows.push([d.worker.prenom, w.semaine, frDate(w.debutSemaine), w.total, w.normales, w.sup25, w.sup50]);
+    });
+    recap.push([d.worker.prenom, d.worker.dob, d.totalH, round2(totalSup25), round2(totalSup50)]);
+  });
+  var wsRecap = XLSX.utils.aoa_to_sheet(recap);
+  XLSX.utils.book_append_sheet(wb, wsRecap, 'RECAP');
+
+  var wsOvertime = XLSX.utils.aoa_to_sheet(overtimeRows);
+  XLSX.utils.book_append_sheet(wb, wsOvertime, 'Heures sup par semaine');
+
+  allData.forEach(function(d){
+    var rows = [['Date','Matin début','Matin fin','Après-midi début','Après-midi fin','Pause (min)','Total jour','Modifié','Commentaire']];
+    var days = Object.keys(d.entries).sort();
+    days.forEach(function(day){
+      var e = d.entries[day];
+      var edited = e.history && e.history.length ? 'Oui ('+e.history.length+')' : 'Non';
+      rows.push([frDate(day), e.matinDebut||'', e.matinFin||'', e.apremDebut||'', e.apremFin||'', e.pause||0, computeTotal(e), edited, e.commentaire||'']);
+    });
+    var sheetName = d.worker.prenom.substring(0,28) || 'Salarié';
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  var modRows = [['Prénom','Jour concerné','Ancien total','Nouveau total','Modifié le']];
+  (mods||[]).forEach(function(m){
+    modRows.push([m.prenom, frDate(m.jour), m.ancienTotal, m.nouveauTotal, m.quand ? new Date(m.quand).toLocaleString('fr-FR') : '']);
+  });
+  var wsMods = XLSX.utils.aoa_to_sheet(modRows);
+  XLSX.utils.book_append_sheet(wb, wsMods, 'Modifications');
+
+  var today = todayISO();
+  XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
+}
+
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null }; render(); };
+
+render();
+})();
+</script>
+</body>
+</html>
