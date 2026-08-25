@@ -74,6 +74,19 @@
   .nav-menu button:last-child{border-bottom:none;}
   .doc-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);}
   .doc-item:last-child{border-bottom:none;}
+  .label-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  .label-card{border:1px dashed var(--line);border-radius:10px;padding:14px;text-align:center;background:#fff;}
+  .label-card .qr{display:flex;justify-content:center;margin-bottom:6px;}
+  .label-card .num{font-size:20px;font-weight:800;color:var(--moss);}
+  .scanner-overlay{position:fixed;inset:0;background:#000;z-index:200;display:flex;flex-direction:column;}
+  .scanner-overlay video{flex:1;width:100%;object-fit:cover;}
+  .scanner-overlay .scanner-bar{padding:16px;background:var(--moss-dark);display:flex;justify-content:space-between;align-items:center;}
+  .scanner-overlay .scanner-bar span{color:#fff;font-weight:600;}
+  @media print{
+    .no-print{display:none !important;}
+    body{background:#fff;}
+    .wrap{max-width:none;}
+  }
 </style>
 </head>
 <body>
@@ -100,6 +113,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <script>
 (function(){
 
@@ -245,6 +260,9 @@ function render(){
   if(state.screen==='adminBulkImport') return renderAdminBulkImport();
   if(state.screen==='adminPayroll') return renderAdminPayroll();
   if(state.screen==='adminBarquettes') return renderAdminBarquettes();
+  if(state.screen==='adminLabels') return renderAdminLabels();
+  if(state.screen==='adminNewWorker') return renderAdminNewWorker();
+  if(state.screen==='adminImportHours') return renderAdminImportHours();
 }
 
 btnMenu.onclick = function(){ navMenu.classList.toggle('hidden'); };
@@ -596,6 +614,7 @@ async function renderSorterEntry(){
     '<div class="card stack">' +
       '<div><label>Date</label><input type="date" id="sorterDatePick" value="'+date+'" max="'+todayISO()+'"'+(editing?' disabled':'')+'></div>' +
       (editing ? '<p class="muted">Modification de la saisie sélectionnée.</p>' : '') +
+      '<button class="btn btn-primary" id="btnScanQR">📷 Scanner le QR du cueilleur</button>' +
       '<div class="grid2">' +
         '<div><label>N° cueilleur (1-56)</label><input type="number" id="cNum" min="1" max="56" placeholder="Ex: 12" value="'+(editing?list[editIdx].cueilleurNum:'')+'"></div>' +
         '<div><label>Nombre de barquettes</label><input type="number" id="cBarq" min="1" placeholder="Ex: 8" value="'+(editing?list[editIdx].barquettes:'')+'"></div>' +
@@ -618,6 +637,18 @@ async function renderSorterEntry(){
   }
 
   app.innerHTML = html;
+
+  document.getElementById('btnScanQR').onclick = function(){
+    openScanner(function(data){
+      var num = parseInt(data, 10);
+      if(!num || num<1 || num>56){
+        alert('QR code non reconnu comme numéro de cueilleur valide (lu : "'+data+'").');
+        return;
+      }
+      document.getElementById('cNum').value = num;
+      document.getElementById('cBarq').focus();
+    });
+  };
 
   document.getElementById('sorterDatePick').addEventListener('change', function(){
     state.sorterDate = this.value;
@@ -772,6 +803,9 @@ async function renderAdminDash(){
     '<button class="btn btn-ghost" id="btnBulkImport">Importer des documents en masse</button>' +
     '<button class="btn btn-ghost" id="btnPayroll">Récap virements &amp; cotisations</button>' +
     '<button class="btn btn-ghost" id="btnBarquettes">Suivi barquettes (tri)</button>' +
+    '<button class="btn btn-ghost" id="btnLabels">Étiquettes QR cueilleurs</button>' +
+    '<button class="btn btn-ghost" id="btnNewWorker">Créer un salarié</button>' +
+    '<button class="btn btn-ghost" id="btnImportHours">Importer une feuille d\'heures</button>' +
     '<div class="section-title">Suivi des documents</div>' +
     '<div class="card">' + docStatusHtml + '</div>' +
     '<div class="link-row" id="btnResetInfo">Les identifiants sont : prénom + date de naissance donnés en début de saison.</div>' +
@@ -790,6 +824,21 @@ async function renderAdminDash(){
 
   document.getElementById('btnBarquettes').onclick = function(){
     state.screen = 'adminBarquettes';
+    render();
+  };
+
+  document.getElementById('btnLabels').onclick = function(){
+    state.screen = 'adminLabels';
+    render();
+  };
+
+  document.getElementById('btnNewWorker').onclick = function(){
+    state.screen = 'adminNewWorker';
+    render();
+  };
+
+  document.getElementById('btnImportHours').onclick = function(){
+    state.screen = 'adminImportHours';
     render();
   };
 
@@ -1274,12 +1323,258 @@ async function renderAdminBarquettes(){
   };
 }
 
+function renderAdminLabels(){
+  headerTitle.textContent = 'Étiquettes QR';
+  var html =
+    '<div class="no-print">' +
+      '<button class="btn btn-ghost" id="btnBackLabels">‹ Retour à l\'équipe</button>' +
+      '<p class="muted" style="margin:10px 0;">56 étiquettes, une par cueilleur (1 à 56). Imprime, découpe et plastifie-les si besoin — chacune contient un QR code encodant simplement le numéro du cueilleur.</p>' +
+      '<button class="btn btn-gold" id="btnPrintLabels">Imprimer</button>' +
+    '</div>' +
+    '<div class="label-grid" id="labelGrid" style="margin-top:16px;"></div>';
+  app.innerHTML = html;
+
+  document.getElementById('btnBackLabels').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnPrintLabels').onclick = function(){ window.print(); };
+
+  var grid = document.getElementById('labelGrid');
+  for(var n=1; n<=56; n++){
+    var card = document.createElement('div');
+    card.className = 'label-card';
+    var qrDiv = document.createElement('div');
+    qrDiv.className = 'qr';
+    card.appendChild(qrDiv);
+    var numDiv = document.createElement('div');
+    numDiv.className = 'num';
+    numDiv.textContent = 'Cueilleur n°' + n;
+    card.appendChild(numDiv);
+    grid.appendChild(card);
+    if(window.QRCode){
+      new QRCode(qrDiv, { text: String(n), width: 110, height: 110, correctLevel: QRCode.CorrectLevel.M });
+    }
+  }
+}
+
+async function openScanner(onResult){
+  var overlay = document.createElement('div');
+  overlay.className = 'scanner-overlay';
+  overlay.innerHTML =
+    '<div class="scanner-bar"><span>Vise le QR code du cueilleur</span><button class="btn btn-ghost" id="btnCancelScan" style="width:auto;padding:8px 14px;color:#fff;border-color:#fff;">Annuler</button></div>' +
+    '<video id="scanVideo" playsinline autoplay></video>';
+  document.body.appendChild(overlay);
+
+  var video = document.getElementById('scanVideo');
+  var canvas = document.createElement('canvas');
+  var ctx = canvas.getContext('2d');
+  var stream = null;
+  var stopped = false;
+
+  function cleanup(){
+    stopped = true;
+    if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); }
+    if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+  document.getElementById('btnCancelScan').onclick = cleanup;
+
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  }catch(err){
+    alert('Impossible d\'accéder à la caméra : ' + err.message);
+    cleanup();
+    return;
+  }
+  video.srcObject = stream;
+
+  function tick(){
+    if(stopped) return;
+    if(video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      var code = window.jsQR ? jsQR(imageData.data, imageData.width, imageData.height) : null;
+      if(code && code.data){
+        cleanup();
+        onResult(code.data);
+        return;
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function renderAdminNewWorker(){
+  headerTitle.textContent = 'Créer un salarié';
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackNewWorker">‹ Retour à l\'équipe</button>' +
+    '<div class="card stack" style="margin-top:14px;">' +
+      '<div><label>Prénom</label><input type="text" id="nwPrenom" placeholder="Prénom"></div>' +
+      '<div><label>Date de naissance</label><input type="date" id="nwDob"></div>' +
+      '<div><label>Email (facultatif)</label><input type="text" id="nwEmail" placeholder="email@exemple.fr"></div>' +
+      '<div id="nwErr" class="banner hidden"></div>' +
+      '<button class="btn btn-gold" id="btnCreateWorker">Créer le compte</button>' +
+    '</div>';
+
+  document.getElementById('btnBackNewWorker').onclick = function(){ state.screen='adminDash'; render(); };
+
+  document.getElementById('btnCreateWorker').onclick = async function(){
+    var prenom = document.getElementById('nwPrenom').value.trim();
+    var dob = document.getElementById('nwDob').value;
+    var email = document.getElementById('nwEmail').value.trim();
+    var errEl = document.getElementById('nwErr');
+    if(!prenom || !dob){
+      errEl.textContent = 'Prénom et date de naissance obligatoires.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    var workers = await getWorkers();
+    var key = normalize(prenom);
+    if(workers.find(function(w){ return w.key===key; })){
+      errEl.textContent = 'Un salarié avec ce prénom existe déjà.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    var w = { id: key+'-'+Date.now(), key:key, prenom:prenom, dob:dob, email:email };
+    workers.push(w);
+    await saveWorkers(workers);
+    alert('Compte créé pour '+prenom+'. Identifiants : prénom + date de naissance.');
+    state.screen = 'adminDash';
+    render();
+  };
+}
+
+async function renderAdminImportHours(){
+  headerTitle.textContent = 'Importer des heures';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+  var options = '<option value="">— choisir —</option>' + workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
+
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackImportH">‹ Retour à l\'équipe</button>' +
+    '<div class="card stack" style="margin-top:14px;">' +
+      '<p class="muted">Le fichier doit avoir une ligne d\'en-tête, puis une ligne par jour avec les colonnes dans cet ordre : Date (JJ/MM/AAAA ou AAAA-MM-JJ), Matin début (HH:MM), Matin fin, Après-midi début, Après-midi fin, Pause (minutes). Les cases vides sont acceptées pour l\'après-midi.</p>' +
+      '<div><label>Salarié</label><select id="ihWorker">'+options+'</select></div>' +
+      '<div><label>Fichier Excel</label><input type="file" id="ihFile" accept=".xlsx,.xls"></div>' +
+      '<button class="btn btn-gold" id="btnDoImportHours">Importer</button>' +
+      '<div id="ihResult" class="muted"></div>' +
+    '</div>';
+
+  document.getElementById('btnBackImportH').onclick = function(){ state.screen='adminDash'; render(); };
+
+  function parseDateCell(v){
+    if(v instanceof Date){
+      return v.toISOString().slice(0,10);
+    }
+    if(typeof v === 'number'){
+      var d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return d.toISOString().slice(0,10);
+    }
+    var s = String(v||'').trim();
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+    return null;
+  }
+  function parseTimeCell(v){
+    if(v===undefined || v===null || v==='') return '';
+    if(typeof v === 'number'){
+      var totalMin = Math.round(v*24*60);
+      var h = Math.floor(totalMin/60), mn = totalMin%60;
+      return String(h).padStart(2,'0')+':'+String(mn).padStart(2,'0');
+    }
+    var s = String(v).trim();
+    var m = s.match(/^(\d{1,2}):(\d{2})/);
+    if(m) return m[1].padStart(2,'0')+':'+m[2];
+    return '';
+  }
+
+  document.getElementById('btnDoImportHours').onclick = async function(){
+    var workerId = document.getElementById('ihWorker').value;
+    var file = document.getElementById('ihFile').files[0];
+    var resultEl = document.getElementById('ihResult');
+    if(!workerId || !file){ alert('Choisis un salarié et un fichier.'); return; }
+    resultEl.textContent = 'Lecture du fichier…';
+    try{
+      var buf = await file.arrayBuffer();
+      var wb = XLSX.read(buf, { type: 'array' });
+      var sheet = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+      var entries = await getEntries(workerId);
+      var count = 0, skipped = 0;
+      for(var i=1; i<rows.length; i++){
+        var row = rows[i] || [];
+        if(!row.length) continue;
+        var dateISO = parseDateCell(row[0]);
+        if(!dateISO){ skipped++; continue; }
+        var matinDebut = parseTimeCell(row[1]);
+        var matinFin = parseTimeCell(row[2]);
+        var apremDebut = parseTimeCell(row[3]);
+        var apremFin = parseTimeCell(row[4]);
+        var pause = row[5]!==undefined && row[5]!=='' ? parseFloat(row[5]) : 0;
+        if(!matinDebut || !matinFin){ skipped++; continue; }
+        var existing = entries[dateISO];
+        var e = { matinDebut:matinDebut, matinFin:matinFin, apremDebut:apremDebut, apremFin:apremFin, pause:pause, importeLe: new Date().toISOString() };
+        if(existing) e.history = existing.history || [];
+        entries[dateISO] = e;
+        count++;
+      }
+      var ok = await saveEntries(workerId, entries);
+      resultEl.textContent = count + ' jour(s) importé(s), ' + skipped + ' ligne(s) ignorée(s) (date ou heures manquantes).';
+    }catch(err){
+      resultEl.textContent = 'Erreur de lecture du fichier : ' + err.message;
+    }
+  };
+}
+
+function isoWeekKey(dateISO){
+  var d = new Date(dateISO+'T00:00:00');
+  var day = (d.getUTCDay()+6)%7; // lundi=0
+  d.setUTCDate(d.getUTCDate()-day+3);
+  var firstThursday = new Date(Date.UTC(d.getUTCFullYear(),0,4));
+  var week = 1 + Math.round(((d-firstThursday)/86400000 - 3 + ((firstThursday.getUTCDay()+6)%7))/7);
+  var monday = new Date(dateISO+'T00:00:00');
+  monday.setDate(monday.getDate() - ((monday.getDay()+6)%7));
+  return d.getUTCFullYear()+'-S'+String(week).padStart(2,'0')+'|'+monday.toISOString().slice(0,10);
+}
+function computeOvertimeWeeks(entries){
+  var byWeek = {};
+  Object.keys(entries).forEach(function(day){
+    var t = computeTotal(entries[day]);
+    if(!t) return;
+    var wk = isoWeekKey(day);
+    byWeek[wk] = round2((byWeek[wk]||0) + t);
+  });
+  var weeks = Object.keys(byWeek).sort();
+  return weeks.map(function(wk){
+    var total = byWeek[wk];
+    var normales = Math.min(total, 35);
+    var sup25 = Math.min(Math.max(total-35, 0), 8);
+    var sup50 = Math.max(total-43, 0);
+    var parts = wk.split('|');
+    return { semaine: parts[0], debutSemaine: parts[1], total: total, normales: round2(normales), sup25: round2(sup25), sup50: round2(sup50) };
+  });
+}
+
 function exportExcel(allData, mods){
   var wb = XLSX.utils.book_new();
-  var recap = [['Prénom','Date de naissance','Total heures']];
-  allData.forEach(function(d){ recap.push([d.worker.prenom, d.worker.dob, d.totalH]); });
+  var recap = [['Prénom','Date de naissance','Total heures','Dont heures sup 125%','Dont heures sup 150%']];
+  var overtimeRows = [['Prénom','Semaine','Début de semaine','Total heures','Heures normales (≤35h)','Heures sup 125% (35-43h)','Heures sup 150% (>43h)']];
+  allData.forEach(function(d){
+    var weeks = computeOvertimeWeeks(d.entries);
+    var totalSup25 = 0, totalSup50 = 0;
+    weeks.forEach(function(w){
+      totalSup25 += w.sup25;
+      totalSup50 += w.sup50;
+      overtimeRows.push([d.worker.prenom, w.semaine, frDate(w.debutSemaine), w.total, w.normales, w.sup25, w.sup50]);
+    });
+    recap.push([d.worker.prenom, d.worker.dob, d.totalH, round2(totalSup25), round2(totalSup50)]);
+  });
   var wsRecap = XLSX.utils.aoa_to_sheet(recap);
   XLSX.utils.book_append_sheet(wb, wsRecap, 'RECAP');
+
+  var wsOvertime = XLSX.utils.aoa_to_sheet(overtimeRows);
+  XLSX.utils.book_append_sheet(wb, wsOvertime, 'Heures sup par semaine');
 
   allData.forEach(function(d){
     var rows = [['Date','Matin début','Matin fin','Après-midi début','Après-midi fin','Pause (min)','Total jour','Modifié','Commentaire']];
