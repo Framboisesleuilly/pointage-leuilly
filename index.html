@@ -1260,7 +1260,16 @@ async function renderAdminBarquettes(){
       '<div class="worker-row"><span class="worker-name">Total barquettes</span><span class="worker-hours">'+totalBarq+'</span></div>' +
       '<div class="worker-row"><span class="worker-name">Équivalent kg (x0,125)</span><span class="worker-hours">'+totalKg+' kg</span></div>' +
       '<div class="worker-row"><span class="worker-name">Cueilleurs actifs</span><span class="worker-hours">'+cueilleurNums.length+'</span></div>' +
-    '</div>';
+    '</div>' +
+    '<div class="section-title">Importer une feuille de tri (photo)</div>' +
+    '<div class="card stack">' +
+      '<p class="muted">Pour ceux qui préfèrent une feuille papier au tri. Prends la feuille en photo, l\'IA lit les numéros de cueilleurs et les quantités, à vérifier avant import.</p>' +
+      '<div><label>Nom du trieur (facultatif)</label><input type="text" id="triPhotoName" placeholder="Ex: Lorena"></div>' +
+      '<div><label>Photo de la feuille</label><input type="file" id="triPhotoFile" accept="image/*" capture="environment"></div>' +
+      '<button class="btn btn-gold" id="btnAnalyzeTriPhoto">Analyser la photo</button>' +
+      '<div id="triPhotoResult" class="muted"></div>' +
+    '</div>' +
+    '<div id="triPhotoReview"></div>';
 
   html += '<div class="section-title">Par trieur</div><div class="card">';
   if(trieurKeys.length){
@@ -1293,6 +1302,67 @@ async function renderAdminBarquettes(){
     state.adminBarqDate = this.value;
     renderAdminBarquettes();
   });
+
+  document.getElementById('btnAnalyzeTriPhoto').onclick = async function(){
+    var name = document.getElementById('triPhotoName').value.trim() || 'Import photo';
+    var file = document.getElementById('triPhotoFile').files[0];
+    var resultEl = document.getElementById('triPhotoResult');
+    if(!file){ alert('Choisis une photo.'); return; }
+    resultEl.textContent = 'Analyse de la photo en cours… (peut prendre 10-20 secondes)';
+    document.getElementById('triPhotoReview').innerHTML = '';
+    try{
+      var base64 = await fileToBase64(file);
+      var r = await fetch('/api/analyze-tri-sheet', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg' })
+      });
+      var data = await r.json();
+      if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error||'inconnue'); return; }
+      var lignes = data.lignes || [];
+      if(!lignes.length){ resultEl.textContent = 'Aucune ligne détectée sur la photo.'; return; }
+      resultEl.textContent = lignes.length + ' ligne(s) détectée(s) — vérifie ci-dessous avant de confirmer.';
+      renderTriPhotoReview(lignes, name, date);
+    }catch(err){
+      resultEl.textContent = 'Erreur : ' + err.message;
+    }
+  };
+
+  function renderTriPhotoReview(lignes, name, date){
+    var html2 = '<div class="section-title">Vérification avant import</div><div class="card">';
+    lignes.forEach(function(l, idx){
+      html2 += '<div class="grid2" style="padding:8px 0;border-bottom:1px solid var(--line);">' +
+        '<div><label>N° cueilleur</label><input type="number" min="1" max="56" data-f="cueilleurNum" data-idx="'+idx+'" value="'+(l.cueilleurNum||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;width:100%;"></div>' +
+        '<div><label>Barquettes</label><input type="number" min="0" data-f="barquettes" data-idx="'+idx+'" value="'+(l.barquettes||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;width:100%;"></div>' +
+      '</div>';
+    });
+    html2 += '</div><button class="btn btn-gold" id="btnConfirmTriImport">Confirmer et importer ces '+lignes.length+' ligne(s)</button><div id="triConfirmResult" class="muted"></div>';
+    document.getElementById('triPhotoReview').innerHTML = html2;
+
+    document.querySelectorAll('#triPhotoReview input[data-f]').forEach(function(inp){
+      inp.addEventListener('change', function(){
+        var idx = parseInt(this.getAttribute('data-idx'),10);
+        var field = this.getAttribute('data-f');
+        lignes[idx][field] = parseInt(this.value,10);
+      });
+    });
+
+    document.getElementById('btnConfirmTriImport').onclick = async function(){
+      var current = await getBarquettes(date);
+      var count = 0;
+      lignes.forEach(function(l){
+        var num = parseInt(l.cueilleurNum,10);
+        var barq = parseInt(l.barquettes,10);
+        if(!num || num<1 || num>56 || !barq || barq<1) return;
+        current.push({ cueilleurNum: num, barquettes: barq, sorterPrenom: name, timestamp: new Date().toISOString(), importeDePhoto: true });
+        count++;
+      });
+      var ok = await saveBarquettes(date, current);
+      var confirmEl = document.getElementById('triConfirmResult');
+      confirmEl.textContent = ok ? (count + ' ligne(s) importée(s) avec succès.') : 'Erreur lors de l\'enregistrement.';
+      if(ok) renderAdminBarquettes();
+    };
+  }
 
   document.getElementById('btnExportBarq').onclick = function(){
     var wb = XLSX.utils.book_new();
