@@ -69,7 +69,17 @@ Règles :
     try {
       parsed = JSON.parse(cleaned);
     } catch (e) {
-      return res.status(500).json({ error: 'Réponse non exploitable, réessaie avec une photo plus nette.', raw: cleaned });
+      var start = cleaned.indexOf('[');
+      var end = cleaned.lastIndexOf(']');
+      if (start !== -1 && end !== -1 && end > start) {
+        try {
+          parsed = JSON.parse(cleaned.slice(start, end+1));
+        } catch (e2) {
+          return res.status(500).json({ error: 'Réponse non exploitable, réessaie avec une photo plus nette.', raw: cleaned });
+        }
+      } else {
+        return res.status(500).json({ error: 'Réponse non exploitable, réessaie avec une photo plus nette.', raw: cleaned });
+      }
     }
 
     return res.status(200).json({ ok: true, jours: parsed });
