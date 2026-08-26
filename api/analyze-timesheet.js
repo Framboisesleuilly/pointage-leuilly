@@ -28,6 +28,11 @@ Règles :
 - N'inclus pas les lignes totalement vides (sans aucune heure).
 - Ne recalcule rien, retranscris fidèlement ce qui est écrit à la main, du mieux que tu peux lire.`;
 
+  const isPdf = mediaType === 'application/pdf';
+  const fileBlock = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: imageBase64 } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } };
+
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -43,7 +48,7 @@ Règles :
           {
             role: 'user',
             content: [
-              { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
+              fileBlock,
               { type: 'text', text: prompt }
             ]
           }

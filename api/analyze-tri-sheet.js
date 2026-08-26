@@ -28,6 +28,11 @@ Règles :
 - Ignore les numéros illisibles ou hors de la plage 1-56.
 - Ne retranscris que ce qui est écrit, sans deviner au-delà de ce qui est visible.`;
 
+  const isPdf = mediaType === 'application/pdf';
+  const fileBlock = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: imageBase64 } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } };
+
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -43,7 +48,7 @@ Règles :
           {
             role: 'user',
             content: [
-              { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
+              fileBlock,
               { type: 'text', text: prompt }
             ]
           }
