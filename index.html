@@ -1222,6 +1222,8 @@ async function renderAdminBarquettes(){
   var date = state.adminBarqDate || todayISO();
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var list = await getBarquettes(date);
+  var allWorkers = await getWorkers();
+  var trieurWorkers = allWorkers.filter(function(w){ return w.isTrieur; });
 
   var byCueilleur = {};
   list.forEach(function(e){
@@ -1273,11 +1275,16 @@ async function renderAdminBarquettes(){
 
   html += '<div class="section-title">Par trieur</div><div class="card">';
   if(trieurKeys.length){
-    trieurKeys.forEach(function(k){
+    trieurKeys.forEach(function(k, ti){
       var t = byTrieur[k];
-      html += '<div class="worker-row" style="align-items:flex-start;">' +
+      var opts = trieurWorkers.map(function(w){ return '<option value="'+w.id+'|'+w.prenom+'"'+(w.prenom===t.prenom?' selected':'')+'>'+w.prenom+'</option>'; }).join('');
+      html += '<div class="worker-row" style="align-items:flex-start;flex-wrap:wrap;">' +
         '<span class="worker-name">'+t.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+t.barq+' barquettes — '+t.kg+' kg'+(t.heures!==null?' — '+t.heures+' h pointées':' — heures du jour non trouvées')+'</span></span>' +
         '<span class="worker-hours">'+(t.kgH!==null?t.kgH+' kg/h':'—')+'</span>' +
+        '<div style="width:100%;margin-top:8px;display:flex;gap:8px;">' +
+          '<select data-reassign-idx="'+ti+'" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;"><option value="">— réaffecter à —</option>'+opts+'</select>' +
+          '<button class="btn btn-ghost" style="width:auto;padding:8px 14px;" data-do-reassign="'+ti+'">Valider</button>' +
+        '</div>' +
       '</div>';
     });
   } else {
@@ -1301,6 +1308,29 @@ async function renderAdminBarquettes(){
   document.getElementById('barqDatePick').addEventListener('change', function(){
     state.adminBarqDate = this.value;
     renderAdminBarquettes();
+  });
+
+  document.querySelectorAll('button[data-do-reassign]').forEach(function(btn){
+    btn.onclick = async function(){
+      var ti = btn.getAttribute('data-do-reassign');
+      var select = document.querySelector('select[data-reassign-idx="'+ti+'"]');
+      var val = select.value;
+      if(!val){ alert('Choisis un trieur dans la liste.'); return; }
+      var parts = val.split('|');
+      var newWorkerId = parts[0], newPrenom = parts[1];
+      var oldKey = trieurKeys[ti];
+      var current = await getBarquettes(date);
+      current.forEach(function(e){
+        var k = e.sorterWorkerId || e.sorterPrenom;
+        if(k === oldKey){
+          e.sorterWorkerId = newWorkerId;
+          e.sorterPrenom = newPrenom;
+        }
+      });
+      var ok = await saveBarquettes(date, current);
+      if(!ok){ alert('Erreur lors de la réaffectation.'); return; }
+      renderAdminBarquettes();
+    };
   });
 
   document.getElementById('btnAnalyzeTriPhoto').onclick = async function(){
