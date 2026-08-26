@@ -1265,7 +1265,7 @@ async function renderAdminBarquettes(){
     '<div class="card stack">' +
       '<p class="muted">Pour ceux qui préfèrent une feuille papier au tri. Prends la feuille en photo, l\'IA lit les numéros de cueilleurs et les quantités, à vérifier avant import.</p>' +
       '<div><label>Nom du trieur (facultatif)</label><input type="text" id="triPhotoName" placeholder="Ex: Lorena"></div>' +
-      '<div><label>Photo de la feuille</label><input type="file" id="triPhotoFile" accept="image/*" capture="environment"></div>' +
+      '<div><label>Photo ou PDF de la feuille</label><input type="file" id="triPhotoFile" accept="image/*,.pdf,application/pdf"></div>' +
       '<button class="btn btn-gold" id="btnAnalyzeTriPhoto">Analyser la photo</button>' +
       '<div id="triPhotoResult" class="muted"></div>' +
     '</div>' +
@@ -1534,7 +1534,7 @@ async function renderAdminImportHours(){
       '<p class="muted">Prends en photo (ou dépose une photo existante de) la feuille de présence manuscrite. L\'IA lit le tableau et te propose les heures détectées, à vérifier avant import.</p>' +
       '<div><label>Salarié</label><select id="phWorker">'+options+'</select></div>' +
       '<div><label>Mois concerné</label><input type="month" id="phMonth" value="'+todayISO().slice(0,7)+'"></div>' +
-      '<div><label>Photo de la feuille</label><input type="file" id="phFile" accept="image/*" capture="environment"></div>' +
+      '<div><label>Photo ou PDF de la feuille</label><input type="file" id="phFile" accept="image/*,.pdf,application/pdf"></div>' +
       '<button class="btn btn-gold" id="btnAnalyzePhoto">Analyser la photo</button>' +
       '<div id="phResult" class="muted"></div>' +
     '</div>' +
