@@ -1600,7 +1600,9 @@ async function renderAdminImportHours(){
 
   function renderPhotoReview(jours, workerId, monthVal){
     var yearMonth = monthVal.split('-');
-    var html = '<div class="section-title">Vérification avant import</div><div class="card">';
+    var html = '<div class="section-title">Vérification avant import</div>';
+    html += '<div class="card"><label>Salarié destinataire (modifiable si besoin, sans refaire l\'analyse)</label><select id="phReviewWorker">'+options+'</select></div>';
+    html += '<div class="card">';
     jours.forEach(function(j, idx){
       var dateStr = yearMonth[0]+'-'+yearMonth[1]+'-'+String(j.jour).padStart(2,'0');
       html += '<div style="padding:10px 0;border-bottom:1px solid var(--line);">' +
@@ -1618,6 +1620,7 @@ async function renderAdminImportHours(){
     });
     html += '</div><button class="btn btn-gold" id="btnConfirmPhotoImport">Confirmer et importer ces '+jours.length+' jour(s)</button><div id="phConfirmResult" class="muted"></div>';
     document.getElementById('phReview').innerHTML = html;
+    document.getElementById('phReviewWorker').value = workerId;
 
     document.querySelectorAll('#phReview input[data-f]').forEach(function(inp){
       inp.addEventListener('change', function(){
@@ -1628,7 +1631,8 @@ async function renderAdminImportHours(){
     });
 
     document.getElementById('btnConfirmPhotoImport').onclick = async function(){
-      var entries = await getEntries(workerId);
+      var targetWorkerId = document.getElementById('phReviewWorker').value;
+      var entries = await getEntries(targetWorkerId);
       var count = 0;
       jours.forEach(function(j){
         if(!j.matinDebut || !j.matinFin) return;
@@ -1641,7 +1645,7 @@ async function renderAdminImportHours(){
         };
         count++;
       });
-      await saveEntries(workerId, entries);
+      await saveEntries(targetWorkerId, entries);
       document.getElementById('phConfirmResult').textContent = count + ' jour(s) importé(s) avec succès.';
     };
   }
