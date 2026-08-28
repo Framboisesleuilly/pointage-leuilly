@@ -11,11 +11,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Image manquante' });
   }
 
-  const prompt = `Voici la photo d'une feuille de présence manuscrite française ("Feuille de présence"), avec un tableau : Date, Jour, Matin (Heure début / Heure fin), Après-midi (Heure début / Heure fin), Pause, Total Jour.
+  const prompt = `Voici la photo ou le PDF d'une feuille de présence manuscrite française ("Feuille de présence"), avec un tableau : Date, Jour, Matin (Heure début / Heure fin), Après-midi (Heure début / Heure fin), Pause, Total Jour. Il peut aussi y avoir des cases barrées d'un tiret ("—") pour les jours sans travail (dimanches, jours de repos) — ignore ces lignes.
 
-Lis attentivement chaque ligne du tableau qui contient au moins une heure renseignée (ignore les lignes vides, comme les dimanches sans heures).
+Lis attentivement chaque ligne du tableau qui contient au moins une heure renseignée à la main.
 
-Réponds UNIQUEMENT avec un tableau JSON strict, sans aucun texte avant ou après, sans balises markdown, au format exact suivant :
+Réponds UNIQUEMENT avec un tableau JSON strict, rien d'autre : pas de texte avant, pas de texte après, pas d'explication, pas de balises markdown. Format exact :
 [
   {"jour": 1, "matinDebut": "07:30", "matinFin": "12:00", "apremDebut": "12:30", "apremFin": "14:00", "pauseMinutes": 0},
   {"jour": 2, "matinDebut": "07:30", "matinFin": "12:00", "apremDebut": "12:30", "apremFin": "18:00", "pauseMinutes": 0}
@@ -25,8 +25,9 @@ Règles :
 - "jour" est le numéro du jour du mois (1 à 31), tel qu'écrit dans la colonne Date.
 - Les heures sont au format "HH:MM" (24h). Si une case est vide ou barrée (tiret), mets null pour ce champ.
 - "pauseMinutes" est un nombre de minutes (0 si la case Pause est vide).
-- N'inclus pas les lignes totalement vides (sans aucune heure).
-- Ne recalcule rien, retranscris fidèlement ce qui est écrit à la main, du mieux que tu peux lire.`;
+- N'inclus pas les lignes totalement vides ou barrées (sans aucune heure).
+- Retranscris fidèlement ce qui est écrit à la main, du mieux que tu peux lire, même si l'écriture est imparfaite — fais une estimation raisonnable plutôt que de laisser passer une ligne lisible.
+- Ne réponds jamais par du texte d'excuse ou d'explication, uniquement le tableau JSON (même vide : [] si rien n'est lisible du tout).`;
 
   const isPdf = mediaType === 'application/pdf';
   const fileBlock = isPdf
