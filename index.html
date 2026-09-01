@@ -1744,10 +1744,30 @@ function computeOvertimeWeeks(entries){
   });
 }
 
+function computeMonthlyRecap(entries){
+  var byMonth = {};
+  Object.keys(entries).forEach(function(day){
+    var t = computeTotal(entries[day]);
+    if(!t) return;
+    var ym = day.slice(0,7);
+    if(!byMonth[ym]) byMonth[ym] = { heures: 0, jours: 0 };
+    byMonth[ym].heures = round2(byMonth[ym].heures + t);
+    byMonth[ym].jours += 1;
+  });
+  var months = Object.keys(byMonth).sort();
+  var moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  return months.map(function(ym){
+    var parts = ym.split('-');
+    var label = moisNoms[parseInt(parts[1],10)-1] + ' ' + parts[0];
+    return { label: label, heures: byMonth[ym].heures, jours: byMonth[ym].jours };
+  });
+}
+
 function exportExcel(allData, mods){
   var wb = XLSX.utils.book_new();
-  var recap = [['Prénom','Date de naissance','Total heures','Dont heures sup 125%','Dont heures sup 150%']];
+  var recap = [['Prénom','Date de naissance','Total heures','Nombre de jours travaillés','Dont heures sup 125%','Dont heures sup 150%']];
   var overtimeRows = [['Prénom','Semaine','Début de semaine','Total heures','Heures normales (≤35h)','Heures sup 125% (35-43h)','Heures sup 150% (>43h)']];
+  var monthlyRows = [['Prénom','Mois','Total heures','Nombre de jours travaillés']];
   allData.forEach(function(d){
     var weeks = computeOvertimeWeeks(d.entries);
     var totalSup25 = 0, totalSup50 = 0;
@@ -1756,10 +1776,19 @@ function exportExcel(allData, mods){
       totalSup50 += w.sup50;
       overtimeRows.push([d.worker.prenom, w.semaine, frDate(w.debutSemaine), w.total, w.normales, w.sup25, w.sup50]);
     });
-    recap.push([d.worker.prenom, d.worker.dob, d.totalH, round2(totalSup25), round2(totalSup50)]);
+    var totalJours = Object.keys(d.entries).filter(function(day){ return computeTotal(d.entries[day]); }).length;
+    recap.push([d.worker.prenom, d.worker.dob, d.totalH, totalJours, round2(totalSup25), round2(totalSup50)]);
+
+    var months = computeMonthlyRecap(d.entries);
+    months.forEach(function(m){
+      monthlyRows.push([d.worker.prenom, m.label, m.heures, m.jours]);
+    });
   });
   var wsRecap = XLSX.utils.aoa_to_sheet(recap);
   XLSX.utils.book_append_sheet(wb, wsRecap, 'RECAP');
+
+  var wsMonthly = XLSX.utils.aoa_to_sheet(monthlyRows);
+  XLSX.utils.book_append_sheet(wb, wsMonthly, 'Récap mensuel');
 
   var wsOvertime = XLSX.utils.aoa_to_sheet(overtimeRows);
   XLSX.utils.book_append_sheet(wb, wsOvertime, 'Heures sup par semaine');
