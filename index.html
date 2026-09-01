@@ -146,6 +146,24 @@ async function saveBarquettes(date, list){
     return r.ok;
   }catch(err){ return false; }
 }
+async function getSecteurs(){
+  try{ var r = await fetch('/api/secteurs'); return r.ok ? await r.json() : []; }catch(err){ return []; }
+}
+async function saveSecteurs(list){
+  try{ var r = await fetch('/api/secteurs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)}); return r.ok; }catch(err){ return false; }
+}
+async function getParcelleLog(date){
+  try{ var r = await fetch('/api/parcelle?date='+date); return r.ok ? await r.json() : []; }catch(err){ return []; }
+}
+async function saveParcelleLog(date, list){
+  try{ var r = await fetch('/api/parcelle?date='+date, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)}); return r.ok; }catch(err){ return false; }
+}
+async function getBonsApport(){
+  try{ var r = await fetch('/api/bons-apport'); return r.ok ? await r.json() : []; }catch(err){ return []; }
+}
+async function saveBonsApport(list){
+  try{ var r = await fetch('/api/bons-apport', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)}); return r.ok; }catch(err){ return false; }
+}
 async function getSorters(){
   try{ var r = await fetch('/api/sorters'); return r.ok ? await r.json() : []; }catch(err){ return []; }
 }
@@ -204,7 +222,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all' };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -255,6 +273,10 @@ function render(){
   if(state.screen==='workerParams') return renderWorkerParams();
   if(state.screen==='adminLogin') return renderAdminLogin();
   if(state.screen==='adminMenu') return renderAdminMenu();
+  if(state.screen==='adminAgroMenu') return renderAdminAgroMenu();
+  if(state.screen==='adminSecteurs') return renderAdminSecteurs();
+  if(state.screen==='adminParcelleCalendar') return renderAdminParcelleCalendar();
+  if(state.screen==='adminVentes') return renderAdminVentes();
   if(state.screen==='adminDash') return renderAdminDash();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
   if(state.screen==='adminBulkImport') return renderAdminBulkImport();
@@ -736,6 +758,7 @@ function renderAdminMenu(){
     '<button class="home-btn" id="mnuPayroll"><div class="t">Récap virements &amp; cotisations</div><div class="s">Montants extraits des bulletins importés</div></button>' +
     '<button class="home-btn" id="mnuBarquettes"><div class="t">Suivi barquettes (tri)</div><div class="s">Par cueilleur, par trieur, export</div></button>' +
     '<button class="home-btn" id="mnuSendReport"><div class="t">Envoyer le récap quotidien</div><div class="s">Immédiatement, avec sauvegarde jointe</div></button>' +
+    '<button class="home-btn" id="mnuAgro"><div class="t">Agronomie</div><div class="s">Parcelles, secteurs, variétés, ventes</div></button>' +
     '<div id="mnuSendResult" class="muted" style="text-align:center;"></div>';
 
   document.getElementById('mnuHeures').onclick = function(){ state.screen='adminDash'; render(); };
@@ -744,6 +767,7 @@ function renderAdminMenu(){
   document.getElementById('mnuBulkDocs').onclick = function(){ state.screen='adminBulkImport'; render(); };
   document.getElementById('mnuPayroll').onclick = function(){ state.screen='adminPayroll'; render(); };
   document.getElementById('mnuBarquettes').onclick = function(){ state.screen='adminBarquettes'; render(); };
+  document.getElementById('mnuAgro').onclick = function(){ state.screen='adminAgroMenu'; render(); };
   document.getElementById('mnuSendReport').onclick = async function(){
     var resultEl = document.getElementById('mnuSendResult');
     resultEl.textContent = 'Envoi en cours…';
@@ -1707,6 +1731,232 @@ function computeMonthlyRecap(entries){
   });
 }
 
+function renderAdminAgroMenu(){
+  headerTitle.textContent = 'Agronomie';
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackAgro">‹ Retour au menu</button>' +
+    '<div style="margin-top:14px;">' +
+    '<button class="home-btn" id="agroSecteurs"><div class="t">Secteurs, variétés & pots</div><div class="s">10 secteurs — variété, nombre de pots, latéraux</div></button>' +
+    '<button class="home-btn" id="agroCalendar"><div class="t">Calendrier parcelle</div><div class="s">Irrigation, drainage, EC, pH par secteur et par jour</div></button>' +
+    '<button class="home-btn" id="agroVentes"><div class="t">Ventes (bons d\'apport)</div><div class="s">Import hebdomadaire, kg et prix, statistiques</div></button>' +
+    '</div>';
+
+  document.getElementById('btnBackAgro').onclick = function(){ state.screen='adminMenu'; render(); };
+  document.getElementById('agroSecteurs').onclick = function(){ state.screen='adminSecteurs'; render(); };
+  document.getElementById('agroCalendar').onclick = function(){ state.screen='adminParcelleCalendar'; render(); };
+  document.getElementById('agroVentes').onclick = function(){ state.screen='adminVentes'; render(); };
+}
+
+async function renderAdminSecteurs(){
+  headerTitle.textContent = 'Secteurs';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var secteurs = await getSecteurs();
+  if(!secteurs.length){
+    secteurs = [];
+    for(var i=1;i<=10;i++){ secteurs.push({ num:i, variete:'', pots:0, lateraux:0 }); }
+  }
+  secteurs.sort(function(a,b){ return a.num-b.num; });
+
+  var html = '<button class="btn btn-ghost" id="btnBackSecteurs">‹ Retour à l\'agronomie</button>';
+  html += '<p class="muted" style="margin:10px 0;">Renseigne la variété, le nombre de pots et le nombre de latéraux pour chacun de tes 10 secteurs.</p>';
+  secteurs.forEach(function(s, idx){
+    html += '<div class="card stack">' +
+      '<div class="worker-name">Secteur '+s.num+'</div>' +
+      '<div><label>Variété</label><input type="text" data-idx="'+idx+'" data-f="variete" value="'+(s.variete||'')+'" placeholder="Ex: Kwanza"></div>' +
+      '<div class="grid2">' +
+        '<div><label>Nombre de pots</label><input type="number" min="0" data-idx="'+idx+'" data-f="pots" value="'+(s.pots||0)+'"></div>' +
+        '<div><label>Nombre de latéraux</label><input type="number" min="0" data-idx="'+idx+'" data-f="lateraux" value="'+(s.lateraux||0)+'"></div>' +
+      '</div>' +
+    '</div>';
+  });
+  html += '<button class="btn btn-gold" id="btnSaveSecteurs">Enregistrer les 10 secteurs</button><div id="secteursResult" class="muted" style="text-align:center;"></div>';
+
+  app.innerHTML = html;
+
+  document.getElementById('btnBackSecteurs').onclick = function(){ state.screen='adminAgroMenu'; render(); };
+  document.getElementById('btnSaveSecteurs').onclick = async function(){
+    document.querySelectorAll('input[data-idx]').forEach(function(inp){
+      var idx = parseInt(inp.getAttribute('data-idx'),10);
+      var f = inp.getAttribute('data-f');
+      secteurs[idx][f] = (f==='variete') ? inp.value : (parseInt(inp.value,10)||0);
+    });
+    var ok = await saveSecteurs(secteurs);
+    document.getElementById('secteursResult').textContent = ok ? 'Enregistré ✓' : 'Erreur lors de l\'enregistrement.';
+  };
+}
+
+async function renderAdminParcelleCalendar(){
+  headerTitle.textContent = 'Calendrier parcelle';
+  var date = state.parcelleDate || todayISO();
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var secteurs = await getSecteurs();
+  if(!secteurs.length){ for(var i=1;i<=10;i++){ secteurs.push({num:i, variete:''}); } }
+  secteurs.sort(function(a,b){ return a.num-b.num; });
+  var log = await getParcelleLog(date);
+  var editSecteur = state.parcelleEditSecteur || secteurs[0].num;
+  var existing = log.find(function(l){ return l.secteur === editSecteur; }) || {};
+
+  var secteurOptions = secteurs.map(function(s){ return '<option value="'+s.num+'"'+(editSecteur===s.num?' selected':'')+'>Secteur '+s.num+(s.variete?' — '+s.variete:'')+'</option>'; }).join('');
+
+  var html = '<button class="btn btn-ghost" id="btnBackCal">‹ Retour à l\'agronomie</button>';
+  html += '<div class="card stack" style="margin-top:14px;">' +
+    '<div><label>Date</label><input type="date" id="calDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
+    '<div><label>Secteur</label><select id="calSecteurPick">'+secteurOptions+'</select></div>' +
+    '<div class="grid2">' +
+      '<div><label>Irrigation (min ou L)</label><input type="number" min="0" id="calIrrigation" value="'+(existing.irrigation!==undefined?existing.irrigation:'')+'"></div>' +
+      '<div><label>Drainage (%)</label><input type="number" min="0" step="0.1" id="calDrainage" value="'+(existing.drainage!==undefined?existing.drainage:'')+'"></div>' +
+    '</div>' +
+    '<div class="grid2">' +
+      '<div><label>EC (mS/cm)</label><input type="number" min="0" step="0.01" id="calEc" value="'+(existing.ec!==undefined?existing.ec:'')+'"></div>' +
+      '<div><label>pH</label><input type="number" min="0" step="0.01" id="calPh" value="'+(existing.ph!==undefined?existing.ph:'')+'"></div>' +
+    '</div>' +
+    '<div><label>Notes (facultatif)</label><textarea id="calNotes" rows="2" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:9px;font-size:15px;font-family:inherit;">'+(existing.notes||'')+'</textarea></div>' +
+    '<button class="btn btn-gold" id="btnSaveCal">Enregistrer ce secteur</button>' +
+  '</div>';
+
+  if(log.length){
+    html += '<div class="section-title">Secteurs déjà saisis le '+frDate(date)+'</div><div class="card">';
+    log.slice().sort(function(a,b){return a.secteur-b.secteur;}).forEach(function(l){
+      html += '<div class="hist-item" data-secteur="'+l.secteur+'" style="cursor:pointer;"><span class="hist-date">Secteur '+l.secteur+'</span><span class="hist-total">EC '+(l.ec!==undefined?l.ec:'—')+' / pH '+(l.ph!==undefined?l.ph:'—')+'</span></div>';
+    });
+    html += '</div>';
+  }
+
+  app.innerHTML = html;
+
+  document.getElementById('btnBackCal').onclick = function(){ state.screen='adminAgroMenu'; render(); };
+  document.getElementById('calDatePick').addEventListener('change', function(){
+    state.parcelleDate = this.value;
+    renderAdminParcelleCalendar();
+  });
+  document.getElementById('calSecteurPick').addEventListener('change', function(){
+    state.parcelleEditSecteur = parseInt(this.value,10);
+    renderAdminParcelleCalendar();
+  });
+  document.querySelectorAll('.hist-item[data-secteur]').forEach(function(row){
+    row.addEventListener('click', function(){
+      state.parcelleEditSecteur = parseInt(row.getAttribute('data-secteur'),10);
+      renderAdminParcelleCalendar();
+    });
+  });
+
+  document.getElementById('btnSaveCal').onclick = async function(){
+    var entry = {
+      secteur: editSecteur,
+      irrigation: document.getElementById('calIrrigation').value ? parseFloat(document.getElementById('calIrrigation').value) : null,
+      drainage: document.getElementById('calDrainage').value ? parseFloat(document.getElementById('calDrainage').value) : null,
+      ec: document.getElementById('calEc').value ? parseFloat(document.getElementById('calEc').value) : null,
+      ph: document.getElementById('calPh').value ? parseFloat(document.getElementById('calPh').value) : null,
+      notes: document.getElementById('calNotes').value,
+      modifieLe: new Date().toISOString()
+    };
+    var current = await getParcelleLog(date);
+    var idx = current.findIndex(function(l){ return l.secteur === editSecteur; });
+    if(idx !== -1) current[idx] = entry; else current.push(entry);
+    var ok = await saveParcelleLog(date, current);
+    if(!ok){ alert('Erreur lors de l\'enregistrement.'); return; }
+    renderAdminParcelleCalendar();
+  };
+}
+
+async function renderAdminVentes(){
+  headerTitle.textContent = 'Ventes';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var bons = await getBonsApport();
+
+  var totalKg = round2(bons.reduce(function(s,b){ return s + (parseFloat(b.kg)||0); }, 0));
+  var totalMontant = round2(bons.reduce(function(s,b){ return s + (parseFloat(b.montant)||0); }, 0));
+
+  var byVariete = {};
+  bons.forEach(function(b){
+    var v = b.variete || '—';
+    if(!byVariete[v]) byVariete[v] = { kg:0, montant:0 };
+    byVariete[v].kg = round2(byVariete[v].kg + (parseFloat(b.kg)||0));
+    byVariete[v].montant = round2(byVariete[v].montant + (parseFloat(b.montant)||0));
+  });
+
+  var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour à l\'agronomie</button>';
+  html += '<div class="section-title" style="margin-top:14px;">Importer un bon d\'apport (hebdomadaire)</div>';
+  html += '<div class="card stack">' +
+    '<p class="muted">Fichier Excel avec une ligne d\'en-tête puis, par ligne : Date, Variété, Kg, Prix €/kg.</p>' +
+    '<div><label>Fichier Excel</label><input type="file" id="venteFile" accept=".xlsx,.xls"></div>' +
+    '<button class="btn btn-gold" id="btnImportVentes">Importer</button>' +
+    '<div id="venteResult" class="muted"></div>' +
+  '</div>';
+
+  html += '<div class="card">' +
+    '<div class="worker-row"><span class="worker-name">Total kg vendus</span><span class="worker-hours">'+totalKg+' kg</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Total montant</span><span class="worker-hours">'+totalMontant+' €</span></div>' +
+  '</div>';
+
+  var varieteKeys = Object.keys(byVariete);
+  if(varieteKeys.length){
+    html += '<div class="section-title">Par variété</div><div class="card">';
+    varieteKeys.forEach(function(v){
+      html += '<div class="worker-row"><span class="worker-name">'+v+'</span><span class="worker-hours">'+byVariete[v].kg+' kg — '+byVariete[v].montant+' €</span></div>';
+    });
+    html += '</div>';
+  }
+
+  if(bons.length){
+    html += '<button class="btn btn-ghost" id="btnExportVentes">Exporter en Excel</button>';
+  }
+
+  app.innerHTML = html;
+
+  document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminAgroMenu'; render(); };
+
+  document.getElementById('btnImportVentes').onclick = async function(){
+    var file = document.getElementById('venteFile').files[0];
+    var resultEl = document.getElementById('venteResult');
+    if(!file){ alert('Choisis un fichier.'); return; }
+    resultEl.textContent = 'Lecture du fichier…';
+    try{
+      var buf = await file.arrayBuffer();
+      var wb = XLSX.read(buf, { type: 'array' });
+      var sheet = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+      var current = await getBonsApport();
+      var count = 0;
+      for(var i=1;i<rows.length;i++){
+        var row = rows[i] || [];
+        if(!row.length || !row[0]) continue;
+        var dateVal = row[0];
+        var dateStr;
+        if(dateVal instanceof Date){ dateStr = dateVal.toISOString().slice(0,10); }
+        else if(typeof dateVal === 'number'){ dateStr = new Date(Math.round((dateVal-25569)*86400*1000)).toISOString().slice(0,10); }
+        else { var m = String(dateVal).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/); dateStr = m ? m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0') : String(dateVal); }
+        var variete = row[1] || '';
+        var kg = parseFloat(row[2]) || 0;
+        var prix = parseFloat(row[3]) || 0;
+        if(!kg) continue;
+        current.push({ date: dateStr, variete: variete, kg: kg, prixKg: prix, montant: round2(kg*prix), importeLe: new Date().toISOString() });
+        count++;
+      }
+      var ok = await saveBonsApport(current);
+      if(!ok){ resultEl.textContent = 'Erreur lors de l\'enregistrement.'; return; }
+      resultEl.textContent = count + ' ligne(s) importée(s).';
+      renderAdminVentes();
+    }catch(err){
+      resultEl.textContent = 'Erreur : ' + err.message;
+    }
+  };
+
+  var exportBtn = document.getElementById('btnExportVentes');
+  if(exportBtn) exportBtn.onclick = function(){
+    var wb = XLSX.utils.book_new();
+    var rows = [['Date','Variété','Kg','Prix €/kg','Montant €']];
+    bons.slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); }).forEach(function(b){
+      rows.push([frDate(b.date), b.variete, b.kg, b.prixKg, b.montant]);
+    });
+    rows.push([]);
+    rows.push(['TOTAL','', totalKg, '', totalMontant]);
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Ventes');
+    XLSX.writeFile(wb, 'Ventes_'+todayISO()+'.xlsx');
+  };
+}
+
 function exportExcel(allData, mods){
   var wb = XLSX.utils.book_new();
   var recap = [['Prénom','Date de naissance','Total heures','Nombre de jours travaillés','Dont heures sup 125%','Dont heures sup 150%']];
@@ -1761,7 +2011,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all' }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null }; render(); };
 
 render();
 })();
