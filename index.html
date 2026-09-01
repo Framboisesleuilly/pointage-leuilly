@@ -206,7 +206,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all' };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -487,8 +487,20 @@ async function renderWorkerRapport(){
   if(!months.length){
     html = '<p class="muted">Aucune heure enregistrée pour l\'instant.</p>';
   } else {
-    var moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+    var yearTotals = {};
+    months.forEach(function(ym){
+      var year = ym.slice(0,4);
+      yearTotals[year] = round2((yearTotals[year]||0) + monthTotals[ym]);
+    });
+    var years = Object.keys(yearTotals).sort().reverse();
     html += '<div class="card">';
+    years.forEach(function(y){
+      html += '<div class="worker-row"><span class="worker-name">Total annuel '+y+'</span><span class="worker-hours">'+yearTotals[y]+' h</span></div>';
+    });
+    html += '</div>';
+
+    var moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+    html += '<div class="section-title">Détail par mois</div><div class="card">';
     months.forEach(function(ym){
       var parts = ym.split('-');
       var label = moisNoms[parseInt(parts[1],10)-1] + ' ' + parts[0];
@@ -726,19 +738,26 @@ async function renderAdminDash(){
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var workers = await getWorkers();
   workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+  var monthFilter = state.adminMonthFilter || 'all';
 
   var totalsHtml = '';
   var allData = [];
   var mods = [];
+  var allMonthsSet = {};
   for(var i=0;i<workers.length;i++){
     var w = workers[i];
     var entries = await getEntries(w.id);
     var totalH = 0;
+    var totalHFiltered = 0;
     var days = Object.keys(entries);
     days.forEach(function(d){
       var entry = entries[d];
       var t = computeTotal(entry);
-      if(t) totalH += t;
+      if(t){
+        totalH += t;
+        allMonthsSet[d.slice(0,7)] = true;
+        if(monthFilter==='all' || d.slice(0,7)===monthFilter) totalHFiltered += t;
+      }
       if(entry.history && entry.history.length){
         entry.history.forEach(function(h){
           mods.push({ prenom: w.prenom, jour: d, ancienTotal: h.total, nouveauTotal: computeTotal(entry), quand: h.remplaceLe });
@@ -746,10 +765,19 @@ async function renderAdminDash(){
       }
     });
     allData.push({worker:w, entries:entries, totalH: round2(totalH)});
-    totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalH)+' h ›</span></div>';
+    totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalHFiltered)+' h ›</span></div>';
   }
 
   if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; }
+
+  var moisNomsFilter = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  var allMonthsList = Object.keys(allMonthsSet).sort().reverse();
+  var monthFilterOptions = '<option value="all"'+(monthFilter==='all'?' selected':'')+'>Tous les mois (total général)</option>' +
+    allMonthsList.map(function(ym){
+      var parts = ym.split('-');
+      var label = moisNomsFilter[parseInt(parts[1],10)-1] + ' ' + parts[0];
+      return '<option value="'+ym+'"'+(monthFilter===ym?' selected':'')+'>'+label+'</option>';
+    }).join('');
 
   var docStatusHtml = '';
   var moisNomsDoc = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
@@ -796,6 +824,9 @@ async function renderAdminDash(){
 
   app.innerHTML =
     '<div class="card">' +
+      '<label style="margin-bottom:6px;">Mois affiché</label><select id="monthFilterSelect">'+monthFilterOptions+'</select>' +
+    '</div>' +
+    '<div class="card">' +
       '<div class="section-title" style="margin-top:0;">Total par salarié</div>' +
       totalsHtml +
     '</div>' +
@@ -841,6 +872,11 @@ async function renderAdminDash(){
     state.screen = 'adminImportHours';
     render();
   };
+
+  document.getElementById('monthFilterSelect').addEventListener('change', function(){
+    state.adminMonthFilter = this.value;
+    renderAdminDash();
+  });
 
   document.getElementById('btnExport').onclick = function(){
     exportExcel(allData, mods);
@@ -1817,7 +1853,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all' }; render(); };
 
 render();
 })();
