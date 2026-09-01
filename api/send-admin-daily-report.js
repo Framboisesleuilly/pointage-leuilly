@@ -79,7 +79,8 @@ export default async function handler(req, res) {
   const workers = (await kv.get('workers')) || [];
   const today = new Date().toISOString().slice(0,10);
   const dayOfMonth = new Date().getDate();
-  const includeBackup = (dayOfMonth % 2 === 0); // un jour sur deux
+  const forceBackup = req.query && (req.query.includeBackup === '1');
+  const includeBackup = forceBackup || (dayOfMonth % 2 === 0); // un jour sur deux, ou forcé manuellement
 
   let totalDuJour = 0;
   let ontRempli = [];
