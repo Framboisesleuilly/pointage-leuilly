@@ -113,8 +113,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <script>
 (function(){
 
@@ -256,12 +254,12 @@ function render(){
   if(state.screen==='workerDocs') return renderWorkerDocs();
   if(state.screen==='workerParams') return renderWorkerParams();
   if(state.screen==='adminLogin') return renderAdminLogin();
+  if(state.screen==='adminMenu') return renderAdminMenu();
   if(state.screen==='adminDash') return renderAdminDash();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
   if(state.screen==='adminBulkImport') return renderAdminBulkImport();
   if(state.screen==='adminPayroll') return renderAdminPayroll();
   if(state.screen==='adminBarquettes') return renderAdminBarquettes();
-  if(state.screen==='adminLabels') return renderAdminLabels();
   if(state.screen==='adminNewWorker') return renderAdminNewWorker();
   if(state.screen==='adminImportHours') return renderAdminImportHours();
 }
@@ -618,16 +616,19 @@ async function renderSorterEntry(){
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var list = await getBarquettes(date);
   var editIdx = state.sorterEditIdx;
-  var editing = (editIdx !== null && editIdx !== undefined && list[editIdx]);
+  var editing = (editIdx !== null && editIdx !== undefined && list[editIdx] && list[editIdx].sorterWorkerId === state.worker.id);
+
+  var myEntries = list.map(function(e, idx){ return {e:e, idx:idx}; }).filter(function(o){ return o.e.sorterWorkerId === state.worker.id; });
 
   var totalBarq = list.reduce(function(s,e){ return s + (parseInt(e.barquettes,10)||0); }, 0);
   var totalKg = round2(totalBarq * 0.125);
+  var myTotalBarq = myEntries.reduce(function(s,o){ return s + (parseInt(o.e.barquettes,10)||0); }, 0);
+  var myTotalKg = round2(myTotalBarq * 0.125);
 
   var html =
     '<div class="card stack">' +
       '<div><label>Date</label><input type="date" id="sorterDatePick" value="'+date+'" max="'+todayISO()+'"'+(editing?' disabled':'')+'></div>' +
       (editing ? '<p class="muted">Modification de la saisie sélectionnée.</p>' : '') +
-      '<button class="btn btn-primary" id="btnScanQR">📷 Scanner le QR du cueilleur</button>' +
       '<div class="grid2">' +
         '<div><label>N° cueilleur (1-56, ou 0 si pas de papier)</label><input type="number" id="cNum" min="0" max="56" placeholder="Ex: 12" value="'+(editing?list[editIdx].cueilleurNum:'')+'"></div>' +
         '<div><label>Nombre de barquettes</label><input type="number" id="cBarq" min="1" placeholder="Ex: 8" value="'+(editing?list[editIdx].barquettes:'')+'"></div>' +
@@ -636,32 +637,21 @@ async function renderSorterEntry(){
       (editing ? '<button class="btn btn-ghost" id="btnCancelEditBarq">Annuler</button>' : '') +
     '</div>' +
     '<div class="card">' +
-      '<div class="total-line" style="border-top:none;padding-top:0;"><span>Total du jour</span><span class="val">'+totalBarq+' barquettes (~'+totalKg+' kg)</span></div>' +
+      '<div class="total-line" style="border-top:none;padding-top:0;"><span>Mes saisies aujourd\'hui</span><span class="val">'+myTotalBarq+' barquettes (~'+myTotalKg+' kg)</span></div>' +
+      '<p class="muted" style="margin-top:8px;">Total équipe (tous trieurs) : '+totalBarq+' barquettes (~'+totalKg+' kg)</p>' +
     '</div>';
 
-  if(list.length){
-    html += '<div class="section-title">Saisies du jour ('+list.length+')</div><div class="card">';
-    list.slice().reverse().forEach(function(e, revIdx){
-      var idx = list.length - 1 - revIdx;
+  if(myEntries.length){
+    html += '<div class="section-title">Mes saisies du jour ('+myEntries.length+')</div><div class="card">';
+    myEntries.slice().reverse().forEach(function(o){
+      var e = o.e, idx = o.idx;
       var heure = e.timestamp ? new Date(e.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : '';
-      html += '<div class="hist-item"><span class="hist-date">'+cueilleurLabel(e.cueilleurNum)+' — '+e.barquettes+' barquette(s)<br><span class="muted">'+heure+' par '+e.sorterPrenom+'</span></span><span><button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-editidx="'+idx+'">✎</button> <button class="btn btn-ghost" style="width:auto;padding:6px 10px;color:var(--red);" data-delidx="'+idx+'">✕</button></span></div>';
+      html += '<div class="hist-item"><span class="hist-date">'+cueilleurLabel(e.cueilleurNum)+' — '+e.barquettes+' barquette(s)<br><span class="muted">'+heure+'</span></span><span><button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-editidx="'+idx+'">✎</button> <button class="btn btn-ghost" style="width:auto;padding:6px 10px;color:var(--red);" data-delidx="'+idx+'">✕</button></span></div>';
     });
     html += '</div>';
   }
 
   app.innerHTML = html;
-
-  document.getElementById('btnScanQR').onclick = function(){
-    openScanner(function(data){
-      var num = parseInt(data, 10);
-      if(!num || num<1 || num>56){
-        alert('QR code non reconnu comme numéro de cueilleur valide (lu : "'+data+'").');
-        return;
-      }
-      document.getElementById('cNum').value = num;
-      document.getElementById('cBarq').focus();
-    });
-  };
 
   document.getElementById('sorterDatePick').addEventListener('change', function(){
     state.sorterDate = this.value;
@@ -681,6 +671,7 @@ async function renderSorterEntry(){
     if(!barq || barq<1){ alert('Renseigne un nombre de barquettes.'); return; }
     var current = await getBarquettes(date);
     if(editing){
+      if(current[editIdx].sorterWorkerId !== state.worker.id){ alert('Cette saisie ne t\'appartient pas.'); state.sorterEditIdx=null; renderSorterEntry(); return; }
       current[editIdx].cueilleurNum = num;
       current[editIdx].barquettes = barq;
       current[editIdx].modifieLe = new Date().toISOString();
@@ -704,6 +695,7 @@ async function renderSorterEntry(){
     btn.onclick = async function(){
       var idx = parseInt(btn.getAttribute('data-delidx'), 10);
       var current = await getBarquettes(date);
+      if(current[idx] && current[idx].sorterWorkerId !== state.worker.id){ alert('Cette saisie ne t\'appartient pas.'); return; }
       current.splice(idx, 1);
       var ok = await saveBarquettes(date, current);
       if(!ok){ alert('Erreur lors de la suppression. Réessaie.'); return; }
@@ -729,8 +721,40 @@ function renderAdminLogin(){
       el.classList.remove('hidden');
       return;
     }
-    state.screen = 'adminDash';
+    state.screen = 'adminMenu';
     render();
+  };
+}
+
+function renderAdminMenu(){
+  headerTitle.textContent = 'Espace responsable';
+  app.innerHTML =
+    '<button class="home-btn" id="mnuHeures"><div class="t">Heures & export</div><div class="s">Total par salarié, export Excel, suivi des documents</div></button>' +
+    '<button class="home-btn" id="mnuNewWorker"><div class="t">Créer un salarié</div><div class="s">Ajouter un compte directement</div></button>' +
+    '<button class="home-btn" id="mnuImportHours"><div class="t">Importer une feuille d\'heures</div><div class="s">Depuis un fichier Excel ou une photo</div></button>' +
+    '<button class="home-btn" id="mnuBulkDocs"><div class="t">Importer des documents en masse</div><div class="s">Feuilles de paie et autres fichiers</div></button>' +
+    '<button class="home-btn" id="mnuPayroll"><div class="t">Récap virements &amp; cotisations</div><div class="s">Montants extraits des bulletins importés</div></button>' +
+    '<button class="home-btn" id="mnuBarquettes"><div class="t">Suivi barquettes (tri)</div><div class="s">Par cueilleur, par trieur, export</div></button>' +
+    '<button class="home-btn" id="mnuSendReport"><div class="t">Envoyer le récap quotidien</div><div class="s">Immédiatement, avec sauvegarde jointe</div></button>' +
+    '<div id="mnuSendResult" class="muted" style="text-align:center;"></div>';
+
+  document.getElementById('mnuHeures').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('mnuNewWorker').onclick = function(){ state.screen='adminNewWorker'; render(); };
+  document.getElementById('mnuImportHours').onclick = function(){ state.screen='adminImportHours'; render(); };
+  document.getElementById('mnuBulkDocs').onclick = function(){ state.screen='adminBulkImport'; render(); };
+  document.getElementById('mnuPayroll').onclick = function(){ state.screen='adminPayroll'; render(); };
+  document.getElementById('mnuBarquettes').onclick = function(){ state.screen='adminBarquettes'; render(); };
+  document.getElementById('mnuSendReport').onclick = async function(){
+    var resultEl = document.getElementById('mnuSendResult');
+    resultEl.textContent = 'Envoi en cours…';
+    try{
+      var r = await fetch('/api/send-admin-daily-report?includeBackup=1');
+      var data = await r.json();
+      if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error || 'inconnue'); return; }
+      resultEl.textContent = 'Envoyé ✓ — ' + data.totalDuJour + ' h aujourd\'hui, ' + data.pasRempli + ' manquant(s)' + (data.sauvegardeIncluse ? ' (sauvegarde jointe)' : '') + '.';
+    }catch(err){
+      resultEl.textContent = 'Erreur : ' + err.message;
+    }
   };
 }
 
@@ -818,7 +842,8 @@ async function renderAdminDash(){
   } else { modsHtml = '<p class="muted">Aucune modification enregistrée.</p>'; }
 
   app.innerHTML =
-    '<div class="card">' +
+    '<button class="btn btn-ghost" id="btnBackMenu">‹ Retour au menu</button>' +
+    '<div class="card" style="margin-top:14px;">' +
       '<label style="margin-bottom:6px;">Mois affiché</label><select id="monthFilterSelect">'+monthFilterOptions+'</select>' +
     '</div>' +
     '<div class="card">' +
@@ -826,65 +851,13 @@ async function renderAdminDash(){
       totalsHtml +
     '</div>' +
     '<button class="btn btn-gold" id="btnExport">Exporter en Excel</button>' +
-    '<button class="btn btn-ghost" id="btnBulkImport">Importer des documents en masse</button>' +
-    '<button class="btn btn-ghost" id="btnPayroll">Récap virements &amp; cotisations</button>' +
-    '<button class="btn btn-ghost" id="btnBarquettes">Suivi barquettes (tri)</button>' +
-    '<button class="btn btn-ghost" id="btnLabels">Étiquettes QR cueilleurs</button>' +
-    '<button class="btn btn-ghost" id="btnNewWorker">Créer un salarié</button>' +
-    '<button class="btn btn-ghost" id="btnImportHours">Importer une feuille d\'heures</button>' +
-    '<button class="btn btn-ghost" id="btnSendReportNow">Envoyer le récap quotidien maintenant</button>' +
-    '<div id="sendReportResult" class="muted" style="text-align:center;"></div>' +
     '<div class="section-title">Suivi des documents</div>' +
     '<div class="card">' + docStatusHtml + '</div>' +
     '<div class="link-row" id="btnResetInfo">Les identifiants sont : prénom + date de naissance donnés en début de saison.</div>' +
     '<div class="section-title">Journal des modifications</div>' +
     '<div class="card">' + modsHtml + '</div>';
 
-  document.getElementById('btnBulkImport').onclick = function(){
-    state.screen = 'adminBulkImport';
-    render();
-  };
-
-  document.getElementById('btnPayroll').onclick = function(){
-    state.screen = 'adminPayroll';
-    render();
-  };
-
-  document.getElementById('btnBarquettes').onclick = function(){
-    state.screen = 'adminBarquettes';
-    render();
-  };
-
-  document.getElementById('btnLabels').onclick = function(){
-    state.screen = 'adminLabels';
-    render();
-  };
-
-  document.getElementById('btnNewWorker').onclick = function(){
-    state.screen = 'adminNewWorker';
-    render();
-  };
-
-  document.getElementById('btnImportHours').onclick = function(){
-    state.screen = 'adminImportHours';
-    render();
-  };
-
-  document.getElementById('btnSendReportNow').onclick = async function(){
-    var resultEl = document.getElementById('sendReportResult');
-    resultEl.textContent = 'Envoi en cours…';
-    try{
-      var r = await fetch('/api/send-admin-daily-report?includeBackup=1');
-      var data = await r.json();
-      if(!r.ok || data.error){
-        resultEl.textContent = 'Erreur : ' + (data.error || 'inconnue');
-        return;
-      }
-      resultEl.textContent = 'Envoyé ✓ — ' + data.totalDuJour + ' h aujourd\'hui, ' + data.pasRempli + ' manquant(s)' + (data.sauvegardeIncluse ? ' (sauvegarde jointe)' : '') + '.';
-    }catch(err){
-      resultEl.textContent = 'Erreur : ' + err.message;
-    }
-  };
+  document.getElementById('btnBackMenu').onclick = function(){ state.screen='adminMenu'; render(); };
 
   document.getElementById('monthFilterSelect').addEventListener('change', function(){
     state.adminMonthFilter = this.value;
@@ -1103,14 +1076,14 @@ async function renderAdminBulkImport(){
     workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
 
   app.innerHTML =
-    '<button class="btn btn-ghost" id="btnBackBulk">‹ Retour à l\'équipe</button>' +
+    '<button class="btn btn-ghost" id="btnBackBulk">‹ Retour au menu</button>' +
     '<div class="card stack">' +
       '<div><label>Sélectionner les fichiers (plusieurs à la fois)</label><input type="file" id="bulkFiles" multiple></div>' +
       '<p class="muted">Astuce : nomme les fichiers avec le prénom du salarié (ex: Bulletin_Marie_Juillet.pdf) pour une reconnaissance automatique.</p>' +
     '</div>' +
     '<div id="bulkList"></div>';
 
-  document.getElementById('btnBackBulk').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnBackBulk').onclick = function(){ state.screen='adminMenu'; render(); };
 
   document.getElementById('bulkFiles').addEventListener('change', async function(e){
     var files = Array.from(e.target.files);
@@ -1250,11 +1223,11 @@ async function renderAdminPayroll(){
   '</div>';
 
   html += '<button class="btn btn-gold" id="btnExportPayroll">Exporter en Excel</button>';
-  html += '<button class="btn btn-ghost" id="btnBackPayroll">‹ Retour à l\'équipe</button>';
+  html += '<button class="btn btn-ghost" id="btnBackPayroll">‹ Retour au menu</button>';
 
   app.innerHTML = html;
 
-  document.getElementById('btnBackPayroll').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnBackPayroll').onclick = function(){ state.screen='adminMenu'; render(); };
   document.getElementById('btnExportPayroll').onclick = function(){
     var wb = XLSX.utils.book_new();
     var data = [['Prénom','Période','Heures (app)','Heures (bulletin)','Net à virer (€)','Cotisations (€)']];
@@ -1306,7 +1279,7 @@ async function renderAdminBarquettes(){
   }
 
   var html =
-    '<button class="btn btn-ghost" id="btnBackBarq">‹ Retour à l\'équipe</button>' +
+    '<button class="btn btn-ghost" id="btnBackBarq">‹ Retour au menu</button>' +
     '<div class="card stack" style="margin-top:14px;">' +
       '<div><label>Date</label><input type="date" id="barqDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
     '</div>' +
@@ -1356,7 +1329,7 @@ async function renderAdminBarquettes(){
 
   app.innerHTML = html;
 
-  document.getElementById('btnBackBarq').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnBackBarq').onclick = function(){ state.screen='adminMenu'; render(); };
   document.getElementById('barqDatePick').addEventListener('change', function(){
     state.adminBarqDate = this.value;
     renderAdminBarquettes();
@@ -1475,91 +1448,10 @@ async function renderAdminBarquettes(){
   };
 }
 
-function renderAdminLabels(){
-  headerTitle.textContent = 'Étiquettes QR';
-  var html =
-    '<div class="no-print">' +
-      '<button class="btn btn-ghost" id="btnBackLabels">‹ Retour à l\'équipe</button>' +
-      '<p class="muted" style="margin:10px 0;">56 étiquettes, une par cueilleur (1 à 56). Imprime, découpe et plastifie-les si besoin — chacune contient un QR code encodant simplement le numéro du cueilleur.</p>' +
-      '<button class="btn btn-gold" id="btnPrintLabels">Imprimer</button>' +
-    '</div>' +
-    '<div class="label-grid" id="labelGrid" style="margin-top:16px;"></div>';
-  app.innerHTML = html;
-
-  document.getElementById('btnBackLabels').onclick = function(){ state.screen='adminDash'; render(); };
-  document.getElementById('btnPrintLabels').onclick = function(){ window.print(); };
-
-  var grid = document.getElementById('labelGrid');
-  for(var n=1; n<=56; n++){
-    var card = document.createElement('div');
-    card.className = 'label-card';
-    var qrDiv = document.createElement('div');
-    qrDiv.className = 'qr';
-    card.appendChild(qrDiv);
-    var numDiv = document.createElement('div');
-    numDiv.className = 'num';
-    numDiv.textContent = 'Cueilleur n°' + n;
-    card.appendChild(numDiv);
-    grid.appendChild(card);
-    if(window.QRCode){
-      new QRCode(qrDiv, { text: String(n), width: 110, height: 110, correctLevel: QRCode.CorrectLevel.M });
-    }
-  }
-}
-
-async function openScanner(onResult){
-  var overlay = document.createElement('div');
-  overlay.className = 'scanner-overlay';
-  overlay.innerHTML =
-    '<div class="scanner-bar"><span>Vise le QR code du cueilleur</span><button class="btn btn-ghost" id="btnCancelScan" style="width:auto;padding:8px 14px;color:#fff;border-color:#fff;">Annuler</button></div>' +
-    '<video id="scanVideo" playsinline autoplay></video>';
-  document.body.appendChild(overlay);
-
-  var video = document.getElementById('scanVideo');
-  var canvas = document.createElement('canvas');
-  var ctx = canvas.getContext('2d');
-  var stream = null;
-  var stopped = false;
-
-  function cleanup(){
-    stopped = true;
-    if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); }
-    if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
-  }
-  document.getElementById('btnCancelScan').onclick = cleanup;
-
-  try{
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-  }catch(err){
-    alert('Impossible d\'accéder à la caméra : ' + err.message);
-    cleanup();
-    return;
-  }
-  video.srcObject = stream;
-
-  function tick(){
-    if(stopped) return;
-    if(video.readyState === video.HAVE_ENOUGH_DATA){
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      var code = window.jsQR ? jsQR(imageData.data, imageData.width, imageData.height) : null;
-      if(code && code.data){
-        cleanup();
-        onResult(code.data);
-        return;
-      }
-    }
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-}
-
 function renderAdminNewWorker(){
   headerTitle.textContent = 'Créer un salarié';
   app.innerHTML =
-    '<button class="btn btn-ghost" id="btnBackNewWorker">‹ Retour à l\'équipe</button>' +
+    '<button class="btn btn-ghost" id="btnBackNewWorker">‹ Retour au menu</button>' +
     '<div class="card stack" style="margin-top:14px;">' +
       '<div><label>Prénom</label><input type="text" id="nwPrenom" placeholder="Prénom"></div>' +
       '<div><label>Date de naissance</label><input type="date" id="nwDob"></div>' +
@@ -1568,7 +1460,7 @@ function renderAdminNewWorker(){
       '<button class="btn btn-gold" id="btnCreateWorker">Créer le compte</button>' +
     '</div>';
 
-  document.getElementById('btnBackNewWorker').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnBackNewWorker').onclick = function(){ state.screen='adminMenu'; render(); };
 
   document.getElementById('btnCreateWorker').onclick = async function(){
     var prenom = document.getElementById('nwPrenom').value.trim();
@@ -1603,7 +1495,7 @@ async function renderAdminImportHours(){
   var options = '<option value="">— choisir —</option>' + workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
 
   app.innerHTML =
-    '<button class="btn btn-ghost" id="btnBackImportH">‹ Retour à l\'équipe</button>' +
+    '<button class="btn btn-ghost" id="btnBackImportH">‹ Retour au menu</button>' +
     '<div class="card stack" style="margin-top:14px;">' +
       '<p class="muted">Le fichier doit avoir une ligne d\'en-tête, puis une ligne par jour avec les colonnes dans cet ordre : Date (JJ/MM/AAAA ou AAAA-MM-JJ), Matin début (HH:MM), Matin fin, Après-midi début, Après-midi fin, Pause (minutes). Les cases vides sont acceptées pour l\'après-midi.</p>' +
       '<div><label>Salarié</label><select id="ihWorker">'+options+'</select></div>' +
@@ -1622,7 +1514,7 @@ async function renderAdminImportHours(){
     '</div>' +
     '<div id="phReview"></div>';
 
-  document.getElementById('btnBackImportH').onclick = function(){ state.screen='adminDash'; render(); };
+  document.getElementById('btnBackImportH').onclick = function(){ state.screen='adminMenu'; render(); };
 
   document.getElementById('btnAnalyzePhoto').onclick = async function(){
     var workerId = document.getElementById('phWorker').value;
