@@ -211,6 +211,7 @@ var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMo
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
 function round2(n){ return Math.round(n*100)/100; }
+function cueilleurLabel(n){ return (parseInt(n,10)===0) ? 'Non identifié (sans papier)' : 'Cueilleur n°'+n; }
 function timeToDecimal(t){ if(!t) return null; var parts = t.split(':'); return parseInt(parts[0],10) + parseInt(parts[1],10)/60; }
 
 function computeTotal(e){
@@ -628,7 +629,7 @@ async function renderSorterEntry(){
       (editing ? '<p class="muted">Modification de la saisie sélectionnée.</p>' : '') +
       '<button class="btn btn-primary" id="btnScanQR">📷 Scanner le QR du cueilleur</button>' +
       '<div class="grid2">' +
-        '<div><label>N° cueilleur (1-56)</label><input type="number" id="cNum" min="1" max="56" placeholder="Ex: 12" value="'+(editing?list[editIdx].cueilleurNum:'')+'"></div>' +
+        '<div><label>N° cueilleur (1-56, ou 0 si pas de papier)</label><input type="number" id="cNum" min="0" max="56" placeholder="Ex: 12" value="'+(editing?list[editIdx].cueilleurNum:'')+'"></div>' +
         '<div><label>Nombre de barquettes</label><input type="number" id="cBarq" min="1" placeholder="Ex: 8" value="'+(editing?list[editIdx].barquettes:'')+'"></div>' +
       '</div>' +
       '<button class="btn btn-gold" id="btnAddBarq">'+(editing?'Enregistrer la modification':'Ajouter')+'</button>' +
@@ -643,7 +644,7 @@ async function renderSorterEntry(){
     list.slice().reverse().forEach(function(e, revIdx){
       var idx = list.length - 1 - revIdx;
       var heure = e.timestamp ? new Date(e.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : '';
-      html += '<div class="hist-item"><span class="hist-date">Cueilleur n°'+e.cueilleurNum+' — '+e.barquettes+' barquette(s)<br><span class="muted">'+heure+' par '+e.sorterPrenom+'</span></span><span><button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-editidx="'+idx+'">✎</button> <button class="btn btn-ghost" style="width:auto;padding:6px 10px;color:var(--red);" data-delidx="'+idx+'">✕</button></span></div>';
+      html += '<div class="hist-item"><span class="hist-date">'+cueilleurLabel(e.cueilleurNum)+' — '+e.barquettes+' barquette(s)<br><span class="muted">'+heure+' par '+e.sorterPrenom+'</span></span><span><button class="btn btn-ghost" style="width:auto;padding:6px 10px;" data-editidx="'+idx+'">✎</button> <button class="btn btn-ghost" style="width:auto;padding:6px 10px;color:var(--red);" data-delidx="'+idx+'">✕</button></span></div>';
     });
     html += '</div>';
   }
@@ -676,7 +677,7 @@ async function renderSorterEntry(){
   document.getElementById('btnAddBarq').onclick = async function(){
     var num = parseInt(document.getElementById('cNum').value, 10);
     var barq = parseInt(document.getElementById('cBarq').value, 10);
-    if(!num || num<1 || num>56){ alert('Numéro de cueilleur invalide (1 à 56).'); return; }
+    if(isNaN(num) || num<0 || num>56){ alert('Numéro de cueilleur invalide (0 à 56, 0 = non identifié).'); return; }
     if(!barq || barq<1){ alert('Renseigne un nombre de barquettes.'); return; }
     var current = await getBarquettes(date);
     if(editing){
@@ -740,23 +741,33 @@ async function renderAdminDash(){
   workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
   var monthFilter = state.adminMonthFilter || 'all';
 
+  var entriesAll = await Promise.all(workers.map(function(w){ return getEntries(w.id); }));
+  var docsAll = await Promise.all(workers.map(function(w){ return getDocuments(w.id); }));
+
   var totalsHtml = '';
   var allData = [];
   var mods = [];
   var allMonthsSet = {};
+  var docStatusHtml = '';
+  var moisNomsFilter = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+
   for(var i=0;i<workers.length;i++){
     var w = workers[i];
-    var entries = await getEntries(w.id);
+    var entries = entriesAll[i];
+    var wdocs = docsAll[i];
     var totalH = 0;
     var totalHFiltered = 0;
+    var monthsWorked = {};
     var days = Object.keys(entries);
     days.forEach(function(d){
       var entry = entries[d];
       var t = computeTotal(entry);
       if(t){
         totalH += t;
-        allMonthsSet[d.slice(0,7)] = true;
-        if(monthFilter==='all' || d.slice(0,7)===monthFilter) totalHFiltered += t;
+        var ym = d.slice(0,7);
+        allMonthsSet[ym] = true;
+        monthsWorked[ym] = true;
+        if(monthFilter==='all' || ym===monthFilter) totalHFiltered += t;
       }
       if(entry.history && entry.history.length){
         entry.history.forEach(function(h){
@@ -766,11 +777,29 @@ async function renderAdminDash(){
     });
     allData.push({worker:w, entries:entries, totalH: round2(totalH)});
     totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalHFiltered)+' h ›</span></div>';
+
+    var monthKeys = Object.keys(monthsWorked).sort();
+    var docMonthLabels = {};
+    wdocs.forEach(function(doc){ if(doc.periodLabel) docMonthLabels[doc.periodLabel] = true; });
+
+    docStatusHtml += '<div class="worker-row" style="align-items:flex-start;"><span class="worker-name">'+w.prenom+'</span>';
+    if(!monthKeys.length){
+      docStatusHtml += '<span class="muted">aucune heure saisie</span></div>';
+    } else {
+      docStatusHtml += '<span style="text-align:right;">';
+      monthKeys.forEach(function(ym){
+        var parts = ym.split('-');
+        var label = moisNomsFilter[parseInt(parts[1],10)-1].normalize('NFD').replace(/[\u0300-\u036f]/g,'') + '-' + parts[0];
+        var displayLabel = moisNomsFilter[parseInt(parts[1],10)-1] + ' ' + parts[0];
+        var has = !!docMonthLabels[label];
+        docStatusHtml += '<span style="display:block;font-size:13px;color:'+(has?'var(--moss)':'var(--red)')+';">'+(has?'✓':'✗')+' '+displayLabel+'</span>';
+      });
+      docStatusHtml += '</span></div>';
+    }
   }
 
-  if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; }
+  if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; docStatusHtml = '<p class="muted">Aucun salarié pour l\'instant.</p>'; }
 
-  var moisNomsFilter = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
   var allMonthsList = Object.keys(allMonthsSet).sort().reverse();
   var monthFilterOptions = '<option value="all"'+(monthFilter==='all'?' selected':'')+'>Tous les mois (total général)</option>' +
     allMonthsList.map(function(ym){
@@ -778,40 +807,6 @@ async function renderAdminDash(){
       var label = moisNomsFilter[parseInt(parts[1],10)-1] + ' ' + parts[0];
       return '<option value="'+ym+'"'+(monthFilter===ym?' selected':'')+'>'+label+'</option>';
     }).join('');
-
-  var docStatusHtml = '';
-  var moisNomsDoc = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
-  for(var k=0;k<workers.length;k++){
-    var dw = workers[k];
-    var wdocs = await getDocuments(dw.id);
-    var wentries = await getEntries(dw.id);
-
-    var monthsWorked = {};
-    Object.keys(wentries).forEach(function(d){
-      var t = computeTotal(wentries[d]);
-      if(t) monthsWorked[d.slice(0,7)] = true;
-    });
-    var monthKeys = Object.keys(monthsWorked).sort();
-
-    var docMonthLabels = {};
-    wdocs.forEach(function(doc){ if(doc.periodLabel) docMonthLabels[doc.periodLabel] = true; });
-
-    docStatusHtml += '<div class="worker-row" style="align-items:flex-start;"><span class="worker-name">'+dw.prenom+'</span>';
-    if(!monthKeys.length){
-      docStatusHtml += '<span class="muted">aucune heure saisie</span></div>';
-    } else {
-      docStatusHtml += '<span style="text-align:right;">';
-      monthKeys.forEach(function(ym){
-        var parts = ym.split('-');
-        var label = moisNomsDoc[parseInt(parts[1],10)-1].normalize('NFD').replace(/[\u0300-\u036f]/g,'') + '-' + parts[0];
-        var displayLabel = moisNomsDoc[parseInt(parts[1],10)-1] + ' ' + parts[0];
-        var has = !!docMonthLabels[label];
-        docStatusHtml += '<span style="display:block;font-size:13px;color:'+(has?'var(--moss)':'var(--red)')+';">'+(has?'✓':'✗')+' '+displayLabel+'</span>';
-      });
-      docStatusHtml += '</span></div>';
-    }
-  }
-  if(!workers.length) docStatusHtml = '<p class="muted">Aucun salarié pour l\'instant.</p>';
 
   mods.sort(function(a,b){ return (b.quand||'').localeCompare(a.quand||''); });
   var modsHtml = '';
@@ -837,6 +832,8 @@ async function renderAdminDash(){
     '<button class="btn btn-ghost" id="btnLabels">Étiquettes QR cueilleurs</button>' +
     '<button class="btn btn-ghost" id="btnNewWorker">Créer un salarié</button>' +
     '<button class="btn btn-ghost" id="btnImportHours">Importer une feuille d\'heures</button>' +
+    '<button class="btn btn-ghost" id="btnSendReportNow">Envoyer le récap quotidien maintenant</button>' +
+    '<div id="sendReportResult" class="muted" style="text-align:center;"></div>' +
     '<div class="section-title">Suivi des documents</div>' +
     '<div class="card">' + docStatusHtml + '</div>' +
     '<div class="link-row" id="btnResetInfo">Les identifiants sont : prénom + date de naissance donnés en début de saison.</div>' +
@@ -871,6 +868,22 @@ async function renderAdminDash(){
   document.getElementById('btnImportHours').onclick = function(){
     state.screen = 'adminImportHours';
     render();
+  };
+
+  document.getElementById('btnSendReportNow').onclick = async function(){
+    var resultEl = document.getElementById('sendReportResult');
+    resultEl.textContent = 'Envoi en cours…';
+    try{
+      var r = await fetch('/api/send-admin-daily-report?includeBackup=1');
+      var data = await r.json();
+      if(!r.ok || data.error){
+        resultEl.textContent = 'Erreur : ' + (data.error || 'inconnue');
+        return;
+      }
+      resultEl.textContent = 'Envoyé ✓ — ' + data.totalDuJour + ' h aujourd\'hui, ' + data.pasRempli + ' manquant(s)' + (data.sauvegardeIncluse ? ' (sauvegarde jointe)' : '') + '.';
+    }catch(err){
+      resultEl.textContent = 'Erreur : ' + err.message;
+    }
   };
 
   document.getElementById('monthFilterSelect').addEventListener('change', function(){
@@ -1183,16 +1196,19 @@ async function renderAdminPayroll(){
   var workers = await getWorkers();
   workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
 
+  var docsAll = await Promise.all(workers.map(function(w){ return getDocuments(w.id); }));
+  var entriesAll = await Promise.all(workers.map(function(w){ return getEntries(w.id); }));
+
   var rows = [];
   var totalNet = 0, totalCot = 0;
   for(var i=0;i<workers.length;i++){
     var w = workers[i];
-    var docs = await getDocuments(w.id);
+    var docs = docsAll[i];
     var withPay = docs.filter(function(d){ return d.netAPayer !== null && d.netAPayer !== undefined; });
     withPay.sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); });
     var latest = withPay[0] || null;
 
-    var entries = await getEntries(w.id);
+    var entries = entriesAll[i];
     var heuresMois = null;
     if(latest && latest.periodLabel){
       var parts = latest.periodLabel.split('-');
@@ -1331,7 +1347,7 @@ async function renderAdminBarquettes(){
   if(cueilleurNums.length){
     html += '<div class="section-title">Par cueilleur</div><div class="card">';
     cueilleurNums.forEach(function(n){
-      html += '<div class="worker-row"><span class="worker-name">Cueilleur n°'+n+'</span><span class="worker-hours">'+byCueilleur[n]+' barquettes</span></div>';
+      html += '<div class="worker-row"><span class="worker-name">'+cueilleurLabel(n)+'</span><span class="worker-hours">'+byCueilleur[n]+' barquettes</span></div>';
     });
     html += '</div>';
   }
