@@ -113,6 +113,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js"></script>
 <script>
 (function(){
 
@@ -177,6 +178,18 @@ function fileToBase64(file){
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+async function ensureCompatibleImage(file){
+  var isHeic = /heic|heif/i.test(file.type) || /\.hei[cf]$/i.test(file.name||'');
+  if(!isHeic || !window.heic2any) return file;
+  try{
+    var converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+    var blob = Array.isArray(converted) ? converted[0] : converted;
+    return new File([blob], (file.name||'photo').replace(/\.hei[cf]$/i, '.jpg'), { type: 'image/jpeg' });
+  }catch(err){
+    return file; // en cas d'échec de conversion, on tente quand même l'envoi tel quel
+  }
 }
 
 if(window.pdfjsLib){
@@ -1390,6 +1403,7 @@ async function renderAdminBarquettes(){
     resultEl.textContent = 'Analyse de la photo en cours… (peut prendre 10-20 secondes)';
     document.getElementById('triPhotoReview').innerHTML = '';
     try{
+      file = await ensureCompatibleImage(file);
       var base64 = await fileToBase64(file);
       var r = await fetch('/api/analyze-tri-sheet', {
         method: 'POST',
@@ -1549,6 +1563,7 @@ async function renderAdminImportHours(){
     resultEl.textContent = 'Analyse de la photo en cours… (peut prendre 10-20 secondes)';
     document.getElementById('phReview').innerHTML = '';
     try{
+      file = await ensureCompatibleImage(file);
       var base64 = await fileToBase64(file);
       var r = await fetch('/api/analyze-timesheet', {
         method: 'POST',
