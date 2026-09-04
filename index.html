@@ -2060,15 +2060,13 @@ async function renderAdminVentes(){
       '<option value="all"'+(yearFilter==='all'?' selected':'')+'>Toutes les années</option>' +
       years.slice().reverse().map(function(y){ return '<option value="'+y+'"'+(yearFilter===y?' selected':'')+'>'+y+'</option>'; }).join('') +
     '</select></div>';
-  }
 
-  if(years.length > 1){
-    html += '<div class="section-title">Comparatif par année</div>';
+    html += '<div class="section-title">Totaux par année</div>';
     html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:16px;">' +
-      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Année</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Prix moyen €/kg</th></tr>';
+      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Année</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Montant €</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Prix moyen €/kg</th></tr>';
     years.forEach(function(y){
       var prixMoyen = byYear[y].kg ? round2(byYear[y].montant/byYear[y].kg) : 0;
-      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">'+y+'</td><td style="text-align:right;padding:10px 14px;">'+byYear[y].kg+'</td><td style="text-align:right;padding:10px 14px;">'+prixMoyen+'</td></tr>';
+      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">'+y+'</td><td style="text-align:right;padding:10px 14px;">'+byYear[y].kg+'</td><td style="text-align:right;padding:10px 14px;">'+byYear[y].montant+'</td><td style="text-align:right;padding:10px 14px;">'+prixMoyen+'</td></tr>';
     });
     html += '</table>';
   }
@@ -2082,11 +2080,6 @@ async function renderAdminVentes(){
   '</div>' +
   '<div id="ventePdfReview"></div>';
 
-  html += '<div class="card">' +
-    '<div class="worker-row"><span class="worker-name">Total kg vendus'+(yearFilter!=='all'?' ('+yearFilter+')':'')+'</span><span class="worker-hours">'+totalKg+' kg</span></div>' +
-    '<div class="worker-row"><span class="worker-name">Total montant</span><span class="worker-hours">'+totalMontant+' €</span></div>' +
-    '<div class="worker-row"><span class="worker-name">Prix moyen général</span><span class="worker-hours">'+(totalKg?round2(totalMontant/totalKg):0)+' €/kg</span></div>' +
-  '</div>';
   html += '<button class="btn btn-ghost" id="btnCleanupDoublons">Nettoyer les doublons existants (date + note)</button>';
   html += '<button class="btn" id="btnResetVentes" style="background:var(--red);color:#fff;">Réinitialiser tous les bons d\'apport</button>';
   html += '<div id="resetVentesResult" class="muted" style="text-align:center;"></div>';
