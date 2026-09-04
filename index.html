@@ -1996,16 +1996,26 @@ async function renderAdminVentes(){
     byVariete[v].montant = round2(byVariete[v].montant + (parseFloat(b.montant)||0));
   });
 
-  var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour à l\'agronomie</button>';
-  html += '<div class="section-title" style="margin-top:14px;">Importer un bon d\'apport — Excel</div>';
-  html += '<div class="card stack">' +
-    '<p class="muted">Fichier Excel avec une ligne d\'en-tête puis, par ligne : Date, Variété, Kg, Prix €/kg.</p>' +
-    '<div><label>Fichier Excel</label><input type="file" id="venteFile" accept=".xlsx,.xls"></div>' +
-    '<button class="btn btn-gold" id="btnImportVentes">Importer</button>' +
-    '<div id="venteResult" class="muted"></div>' +
-  '</div>';
+  var byNote = {};
+  bons.forEach(function(b){
+    var n = (b.note||'').trim();
+    if(!n) return;
+    if(!byNote[n]) byNote[n] = 0;
+    byNote[n] = round2(byNote[n] + (parseFloat(b.kg)||0));
+  });
+  var noteOrder = ['E','A','B','C','IQF'];
+  var noteKeys = Object.keys(byNote).sort(function(a,b){
+    var ia = noteOrder.indexOf(a), ib = noteOrder.indexOf(b);
+    if(ia===-1 && ib===-1) return a.localeCompare(b);
+    if(ia===-1) return 1;
+    if(ib===-1) return -1;
+    return ia-ib;
+  });
+  var totalKgNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n]; }, 0));
 
-  html += '<div class="section-title">Importer un bon d\'apport — PDF ou photo</div>';
+  var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour à l\'agronomie</button>';
+
+  html += '<div class="section-title" style="margin-top:14px;">Importer un bon d\'apport — PDF ou photo</div>';
   html += '<div class="card stack">' +
     '<p class="muted">Dépose directement le(s) bon(s) d\'apport reçu(s) — plusieurs à la fois si besoin. L\'IA lit et importe automatiquement, regroupé par variété, en évitant les doublons (même date + même variété déjà importée).</p>' +
     '<div><label>Fichier(s)</label><input type="file" id="ventePdfFile" accept="image/*,.pdf,application/pdf" multiple></div>' +
@@ -2028,6 +2038,18 @@ async function renderAdminVentes(){
       html += '<div class="worker-row"><span class="worker-name">'+v+'<br><span class="muted" style="font-weight:400;font-size:12px;">prix moyen '+prixMoyen+' €/kg</span></span><span class="worker-hours">'+byVariete[v].kg+' kg — '+byVariete[v].montant+' €</span></div>';
     });
     html += '</div>';
+  }
+
+  if(noteKeys.length){
+    html += '<div class="section-title">Par note</div>';
+    html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;">' +
+      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Note</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">%</th></tr>';
+    noteKeys.forEach(function(n){
+      var pct = totalKgNotes ? round2((byNote[n]/totalKgNotes)*100) : 0;
+      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;color:var(--ink);">'+n+'</td><td style="text-align:right;padding:10px 14px;">'+byNote[n]+'</td><td style="text-align:right;padding:10px 14px;">'+pct+'%</td></tr>';
+    });
+    html += '<tr style="border-top:2px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">Total</td><td style="text-align:right;padding:10px 14px;font-weight:700;">'+totalKgNotes+'</td><td style="text-align:right;padding:10px 14px;font-weight:700;">100%</td></tr>';
+    html += '</table>';
   }
 
   if(bons.length){
@@ -2068,42 +2090,45 @@ async function renderAdminVentes(){
       return;
     }
 
-    // Regroupe par variété : kg total et prix moyen pondéré.
+    // Regroupe par variété + catégorie (note) : kg total et prix moyen pondéré.
     var groups = {};
     var groupOrder = [];
     allLignes.forEach(function(l){
-      var v = (l.variete || 'Non précisé').trim();
-      if(!groups[v]){ groups[v] = { variete: v, date: l.date||'', kg: 0, montant: 0 }; groupOrder.push(v); }
+      var v = (l.variete || '').trim();
+      var note = (l.note || '').trim();
+      var key = v+'||'+note;
+      if(!groups[key]){ groups[key] = { variete: v, note: note, date: l.date||'', kg: 0, montant: 0 }; groupOrder.push(key); }
       var kg = parseFloat(l.kg)||0;
       var prix = parseFloat(l.prixKg)||0;
-      groups[v].kg = round2(groups[v].kg + kg);
-      groups[v].montant = round2(groups[v].montant + kg*prix);
-      if(l.date && l.date > groups[v].date) groups[v].date = l.date;
+      groups[key].kg = round2(groups[key].kg + kg);
+      groups[key].montant = round2(groups[key].montant + kg*prix);
+      if(l.date && l.date > groups[key].date) groups[key].date = l.date;
     });
 
-    // Détection des doublons : même date + même variété déjà présente dans les bons existants.
+    // Détection des doublons : même date + même variété + même catégorie déjà présente dans les bons existants.
     var current = await getBonsApport();
     var existingKeys = {};
-    current.forEach(function(b){ existingKeys[(b.date||'')+'|'+(b.variete||'').trim().toLowerCase()] = true; });
+    current.forEach(function(b){ existingKeys[(b.date||'')+'|'+(b.variete||'').trim().toLowerCase()+'|'+(b.note||'').trim().toLowerCase()] = true; });
 
     var imported = [], skipped = [];
-    groupOrder.forEach(function(v){
-      var g = groups[v];
+    groupOrder.forEach(function(key){
+      var g = groups[key];
       var kg = g.kg;
       if(!kg) return;
-      var key = (g.date||'')+'|'+v.toLowerCase();
-      if(existingKeys[key]){
-        skipped.push(v+' ('+g.date+')');
+      var dupKey = (g.date||'')+'|'+g.variete.toLowerCase()+'|'+g.note.toLowerCase();
+      var label = (g.note ? g.note : '') + (g.note && g.variete ? ' / ' : '') + (g.variete || (g.note ? '' : 'Non précisé'));
+      if(existingKeys[dupKey]){
+        skipped.push(label+' ('+g.date+')');
         return;
       }
       var prix = kg ? round2(g.montant/kg) : 0;
-      current.push({ date: g.date, variete: v, kg: kg, prixKg: prix, montant: round2(kg*prix), importeLe: new Date().toISOString(), importeDePdf: true });
-      imported.push(v+' — '+kg+' kg à '+prix+' €/kg');
+      current.push({ date: g.date, variete: g.variete, note: g.note, kg: kg, prixKg: prix, montant: round2(kg*prix), importeLe: new Date().toISOString(), importeDePdf: true });
+      imported.push(label+' — '+kg+' kg à '+prix+' €/kg');
     });
 
     var ok = imported.length ? await saveBonsApport(current) : true;
     var msg = '';
-    if(imported.length) msg += imported.length + ' variété(s) importée(s) : ' + imported.join(' / ') + '. ';
+    if(imported.length) msg += imported.length + ' ligne(s) importée(s) : ' + imported.join(' / ') + '. ';
     if(skipped.length) msg += skipped.length + ' doublon(s) ignoré(s) (déjà importé pour cette date) : ' + skipped.join(' / ') + '. ';
     if(errors.length) msg += errors.length + ' fichier(s) en erreur : ' + errors.join(' / ') + '.';
     if(!ok) msg = 'Erreur lors de l\'enregistrement.';
@@ -2111,53 +2136,29 @@ async function renderAdminVentes(){
     if(ok && imported.length) renderAdminVentes();
   };
 
-  document.getElementById('btnImportVentes').onclick = async function(){
-    var file = document.getElementById('venteFile').files[0];
-    var resultEl = document.getElementById('venteResult');
-    if(!file){ alert('Choisis un fichier.'); return; }
-    resultEl.textContent = 'Lecture du fichier…';
-    try{
-      var buf = await file.arrayBuffer();
-      var wb = XLSX.read(buf, { type: 'array' });
-      var sheet = wb.Sheets[wb.SheetNames[0]];
-      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
-      var current = await getBonsApport();
-      var count = 0;
-      for(var i=1;i<rows.length;i++){
-        var row = rows[i] || [];
-        if(!row.length || !row[0]) continue;
-        var dateVal = row[0];
-        var dateStr;
-        if(dateVal instanceof Date){ dateStr = dateVal.toISOString().slice(0,10); }
-        else if(typeof dateVal === 'number'){ dateStr = new Date(Math.round((dateVal-25569)*86400*1000)).toISOString().slice(0,10); }
-        else { var m = String(dateVal).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/); dateStr = m ? m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0') : String(dateVal); }
-        var variete = row[1] || '';
-        var kg = parseFloat(row[2]) || 0;
-        var prix = parseFloat(row[3]) || 0;
-        if(!kg) continue;
-        current.push({ date: dateStr, variete: variete, kg: kg, prixKg: prix, montant: round2(kg*prix), importeLe: new Date().toISOString() });
-        count++;
-      }
-      var ok = await saveBonsApport(current);
-      if(!ok){ resultEl.textContent = 'Erreur lors de l\'enregistrement.'; return; }
-      resultEl.textContent = count + ' ligne(s) importée(s).';
-      renderAdminVentes();
-    }catch(err){
-      resultEl.textContent = 'Erreur : ' + err.message;
-    }
-  };
-
   var exportBtn = document.getElementById('btnExportVentes');
   if(exportBtn) exportBtn.onclick = function(){
     var wb = XLSX.utils.book_new();
-    var rows = [['Date','Variété','Kg','Prix €/kg','Montant €']];
+    var rows = [['Date','Note','Variété','Kg','Prix €/kg','Montant €']];
     bons.slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); }).forEach(function(b){
-      rows.push([frDate(b.date), b.variete, b.kg, b.prixKg, b.montant]);
+      rows.push([frDate(b.date), b.note||'', b.variete, b.kg, b.prixKg, b.montant]);
     });
     rows.push([]);
-    rows.push(['TOTAL','', totalKg, '', totalMontant]);
+    rows.push(['TOTAL','','', totalKg, '', totalMontant]);
     var ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Ventes');
+
+    if(noteKeys.length){
+      var noteRows = [['Note','Kg','%']];
+      noteKeys.forEach(function(n){
+        var pct = totalKgNotes ? round2((byNote[n]/totalKgNotes)*100) : 0;
+        noteRows.push([n, byNote[n], pct]);
+      });
+      noteRows.push(['Total', totalKgNotes, 100]);
+      var wsNotes = XLSX.utils.aoa_to_sheet(noteRows);
+      XLSX.utils.book_append_sheet(wb, wsNotes, 'Par note');
+    }
+
     XLSX.writeFile(wb, 'Ventes_'+todayISO()+'.xlsx');
   };
 }
