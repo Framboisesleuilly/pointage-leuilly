@@ -260,6 +260,7 @@ var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMo
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
 function round2(n){ return Math.round(n*100)/100; }
+function normalizeNote(n){ return (n||'').trim().toUpperCase().replace(/^HS\s+/,''); }
 function cueilleurLabel(n){ return (parseInt(n,10)===0) ? 'Non identifié (sans papier)' : 'Cueilleur n°'+n; }
 function timeToDecimal(t){ if(!t) return null; var parts = t.split(':'); return parseInt(parts[0],10) + parseInt(parts[1],10)/60; }
 
@@ -1993,18 +1994,24 @@ async function renderAdminVentes(){
 
   var byNote = {};
   bons.forEach(function(b){
-    var n = (b.note||'').trim().toUpperCase();
+    var n = normalizeNote(b.note);
     if(!n) return;
     if(!byNote[n]) byNote[n] = 0;
     byNote[n] = round2(byNote[n] + (parseFloat(b.kg)||0));
   });
   var noteOrder = ['E','A','B','C','IQF'];
+  function baseNoteCode(n){ return n.replace(/^HS\s+/i,'').trim(); }
   var noteKeys = Object.keys(byNote).sort(function(a,b){
-    var ia = noteOrder.indexOf(a), ib = noteOrder.indexOf(b);
-    if(ia===-1 && ib===-1) return a.localeCompare(b);
-    if(ia===-1) return 1;
-    if(ib===-1) return -1;
-    return ia-ib;
+    var ba = baseNoteCode(a), bb = baseNoteCode(b);
+    var ia = noteOrder.indexOf(ba), ib = noteOrder.indexOf(bb);
+    if(ia !== ib){
+      if(ia===-1) return 1;
+      if(ib===-1) return -1;
+      return ia-ib;
+    }
+    var aIsHs = /^HS\s+/i.test(a), bIsHs = /^HS\s+/i.test(b);
+    if(aIsHs !== bIsHs) return aIsHs ? 1 : -1;
+    return a.localeCompare(b);
   });
   var totalKgNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n]; }, 0));
 
@@ -2024,6 +2031,8 @@ async function renderAdminVentes(){
     '<div class="worker-row"><span class="worker-name">Total montant</span><span class="worker-hours">'+totalMontant+' €</span></div>' +
     '<div class="worker-row"><span class="worker-name">Prix moyen général</span><span class="worker-hours">'+(totalKg?round2(totalMontant/totalKg):0)+' €/kg</span></div>' +
   '</div>';
+  html += '<button class="btn btn-ghost" id="btnCleanupDoublons">Nettoyer les doublons existants (date + note)</button>';
+  html += '<div id="cleanupResult" class="muted" style="text-align:center;"></div>';
 
   var bonDatesSet = {};
   var bonDatesList = [];
@@ -2064,6 +2073,38 @@ async function renderAdminVentes(){
   html += '</div>';
   } // fin du else (bonDatesList.length)
 
+  if(bonDatesList.length >= 2){
+    var gaps = [];
+    var minD = new Date(bonDatesList[0]+'T00:00:00Z');
+    var maxD = new Date(bonDatesList[bonDatesList.length-1]+'T00:00:00Z');
+    var gapStart = null, prevStr = null;
+    for(var gd = new Date(minD); gd <= maxD; gd.setUTCDate(gd.getUTCDate()+1)){
+      var gdStr = gd.toISOString().slice(0,10);
+      if(!bonDatesSet[gdStr]){
+        if(!gapStart) gapStart = gdStr;
+      } else if(gapStart){
+        gaps.push([gapStart, prevStr]);
+        gapStart = null;
+      }
+      prevStr = gdStr;
+    }
+    if(gapStart) gaps.push([gapStart, prevStr]);
+
+    html += '<div class="section-title">Jours sans bon entre deux livraisons</div>';
+    if(gaps.length){
+      html += '<div class="card">';
+      gaps.forEach(function(g){
+        var label = (g[0]===g[1]) ? frDate(g[0]) : (frDate(g[0])+' → '+frDate(g[1]));
+        var nbJours = Math.round((new Date(g[1]+'T00:00:00Z')-new Date(g[0]+'T00:00:00Z'))/86400000)+1;
+        html += '<div class="worker-row"><span class="worker-name">'+label+'</span><span class="muted">'+nbJours+' jour(s)</span></div>';
+      });
+      html += '</div>';
+      html += '<p class="muted" style="font-size:12px;">Entre le '+frDate(bonDatesList[0])+' (première livraison) et le '+frDate(bonDatesList[bonDatesList.length-1])+' (dernière). Un trou ici ne veut pas forcément dire qu\'un bon manque — il se peut simplement qu\'il n\'y ait pas eu de récolte ce jour-là.</p>';
+    } else {
+      html += '<div class="banner ok">Aucun trou : un bon existe pour chaque jour entre la première et la dernière livraison.</div>';
+    }
+  }
+
   if(noteKeys.length){
     html += '<div class="section-title">Par note</div>';
     html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;">' +
@@ -2083,6 +2124,32 @@ async function renderAdminVentes(){
   app.innerHTML = html;
 
   document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminMenu'; render(); };
+
+  document.getElementById('btnCleanupDoublons').onclick = async function(){
+    var resultEl = document.getElementById('cleanupResult');
+    resultEl.textContent = 'Nettoyage en cours…';
+    var all = await getBonsApport();
+    var merged = {};
+    var order = [];
+    all.forEach(function(b){
+      var note = normalizeNote(b.note) || 'SANS NOTE';
+      var key = (b.date||'')+'|'+note;
+      if(!merged[key]){ merged[key] = { date: b.date||'', note: note, variete: b.variete||'', kg: 0, montant: 0, importeLe: new Date().toISOString() }; order.push(key); }
+      merged[key].kg = round2(merged[key].kg + (parseFloat(b.kg)||0));
+      merged[key].montant = round2(merged[key].montant + (parseFloat(b.montant)||0));
+    });
+    var before = all.length;
+    var cleaned = order.map(function(key){
+      var g = merged[key];
+      var prix = g.kg ? round2(g.montant/g.kg) : 0;
+      return { date: g.date, note: g.note, variete: g.variete, kg: g.kg, prixKg: prix, montant: round2(g.kg*prix), importeLe: g.importeLe };
+    });
+    var ok = await saveBonsApport(cleaned);
+    if(!ok){ resultEl.textContent = 'Erreur lors du nettoyage.'; return; }
+    var removed = before - cleaned.length;
+    resultEl.textContent = removed>0 ? (removed+' doublon(s) fusionné(s), '+cleaned.length+' ligne(s) au final.') : 'Aucun doublon trouvé.';
+    if(removed>0) renderAdminVentes();
+  };
   document.getElementById('venteCalMonthPick').addEventListener('change', function(){
     state.venteCalMonth = this.value;
     renderAdminVentes();
@@ -2118,13 +2185,13 @@ async function renderAdminVentes(){
       return;
     }
 
-    // Regroupe par variété + catégorie (note) : kg total et prix moyen pondéré.
+    // Regroupe par catégorie (note) uniquement : le texte de variété étant très long et variable d'un import à l'autre, il n'est plus fiable pour distinguer les lignes.
     var groups = {};
     var groupOrder = [];
     allLignes.forEach(function(l){
+      var note = normalizeNote(l.note) || 'SANS NOTE';
       var v = (l.variete || '').trim();
-      var note = (l.note || '').trim().toUpperCase();
-      var key = v+'||'+note;
+      var key = note;
       if(!groups[key]){ groups[key] = { variete: v, note: note, date: l.date||'', kg: 0, montant: 0 }; groupOrder.push(key); }
       var kg = parseFloat(l.kg)||0;
       var prix = parseFloat(l.prixKg)||0;
@@ -2133,18 +2200,18 @@ async function renderAdminVentes(){
       if(l.date && l.date > groups[key].date) groups[key].date = l.date;
     });
 
-    // Détection des doublons : même date + même variété + même catégorie déjà présente dans les bons existants.
+    // Détection des doublons : même date + même catégorie déjà présente dans les bons existants (la variété, texte trop variable, n'est plus prise en compte).
     var current = await getBonsApport();
     var existingKeys = {};
-    current.forEach(function(b){ existingKeys[(b.date||'')+'|'+(b.variete||'').trim().toLowerCase()+'|'+(b.note||'').trim().toLowerCase()] = true; });
+    current.forEach(function(b){ existingKeys[(b.date||'')+'|'+normalizeNote(b.note)] = true; });
 
     var imported = [], skipped = [];
     groupOrder.forEach(function(key){
       var g = groups[key];
       var kg = g.kg;
       if(!kg) return;
-      var dupKey = (g.date||'')+'|'+g.variete.toLowerCase()+'|'+g.note.toLowerCase();
-      var label = (g.note ? g.note : '') + (g.note && g.variete ? ' / ' : '') + (g.variete || (g.note ? '' : 'Non précisé'));
+      var dupKey = (g.date||'')+'|'+g.note;
+      var label = g.note;
       if(existingKeys[dupKey]){
         skipped.push(label+' ('+g.date+')');
         return;
