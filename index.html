@@ -1514,14 +1514,14 @@ async function renderAdminBarquettes(){
     var resultEl = document.getElementById('repairResult');
     if(!from || !to){ alert('Choisis les deux dates.'); return; }
     if(from > to){ alert('La date de début doit précéder la date de fin.'); return; }
-    var start = new Date(from+'T00:00:00');
-    var end = new Date(to+'T00:00:00');
+    var start = new Date(from+'T00:00:00Z');
+    var end = new Date(to+'T00:00:00Z');
     var maxDays = 400;
     var dayCount = Math.round((end-start)/86400000)+1;
     if(dayCount > maxDays){ alert('Période trop longue (max '+maxDays+' jours), réduis-la.'); return; }
 
     var repaired = 0, checked = 0;
-    for(var d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
+    for(var d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate()+1)){
       var dStr = d.toISOString().slice(0,10);
       checked++;
       resultEl.textContent = 'Vérification… ('+checked+'/'+dayCount+') — '+repaired+' jour(s) réparé(s)';
@@ -1748,13 +1748,13 @@ async function renderAdminImportHours(){
 }
 
 function isoWeekKey(dateISO){
-  var d = new Date(dateISO+'T00:00:00');
+  var d = new Date(dateISO+'T00:00:00Z');
   var day = (d.getUTCDay()+6)%7; // lundi=0
   d.setUTCDate(d.getUTCDate()-day+3);
   var firstThursday = new Date(Date.UTC(d.getUTCFullYear(),0,4));
   var week = 1 + Math.round(((d-firstThursday)/86400000 - 3 + ((firstThursday.getUTCDay()+6)%7))/7);
-  var monday = new Date(dateISO+'T00:00:00');
-  monday.setDate(monday.getDate() - ((monday.getDay()+6)%7));
+  var monday = new Date(dateISO+'T00:00:00Z');
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay()+6)%7));
   return d.getUTCFullYear()+'-S'+String(week).padStart(2,'0')+'|'+monday.toISOString().slice(0,10);
 }
 function computeOvertimeWeeks(entries){
@@ -2147,16 +2147,16 @@ async function renderAdminAgroVue(){
   var secteurMap = {};
   secteurs.forEach(function(s){ secteurMap[s.num] = s; });
 
-  var today = new Date(todayISO()+'T00:00:00');
+  var today = new Date(todayISO()+'T00:00:00Z');
   var fromDate = new Date(today);
-  fromDate.setDate(fromDate.getDate() - days + 1);
+  fromDate.setUTCDate(fromDate.getUTCDate() - days + 1);
 
   var entries = [];
   var cursor = new Date(fromDate);
   var dateList = [];
   while(cursor <= today){
     dateList.push(cursor.toISOString().slice(0,10));
-    cursor.setDate(cursor.getDate()+1);
+    cursor.setUTCDate(cursor.getUTCDate()+1);
   }
   var logsPerDate = await Promise.all(dateList.map(function(d){ return getParcelleLog(d); }));
   logsPerDate.forEach(function(list, i){
@@ -2242,8 +2242,8 @@ async function renderAdminRythme(){
   workers.forEach(function(w){ if(w.numeroCueilleur) numToWorker[w.numeroCueilleur] = w; });
 
   var dateList = [];
-  var d0 = new Date(date+'T00:00:00');
-  for(var i=6;i>=0;i--){ var dd = new Date(d0); dd.setDate(dd.getDate()-i); dateList.push(dd.toISOString().slice(0,10)); }
+  var d0 = new Date(date+'T00:00:00Z');
+  for(var i=6;i>=0;i--){ var dd = new Date(d0); dd.setUTCDate(dd.getUTCDate()-i); dateList.push(dd.toISOString().slice(0,10)); }
   var listsPerDay = await Promise.all(dateList.map(function(dd){ return getBarquettes(dd); }));
 
   var perCueilleurPerDay = {};
