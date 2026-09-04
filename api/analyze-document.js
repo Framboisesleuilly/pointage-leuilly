@@ -36,19 +36,20 @@ Règles :
 - Si un nombre est illisible, ignore-le plutôt que de deviner.
 - Fais de ton mieux même si l'écriture est imparfaite — ne réponds jamais par du texte d'excuse ou d'explication, uniquement le tableau JSON (même vide : [] si rien n'est lisible).`,
 
-  bonApport: `Voici un bon d'apport (bordereau de livraison de fruits) au format PDF ou photo, remis par un point de collecte ou une coopérative, indiquant les quantités livrées et leur prix.
+  bonApport: `Voici un bon d'apport (bordereau de livraison de fruits) au format PDF ou photo, remis par un point de collecte ou une coopérative, indiquant les quantités livrées et leur prix. Le document classe souvent les fruits par catégorie de qualité (des codes courts comme E, A, B, C, IQF, ou "Vente directe"), en plus ou à la place d'une variété.
 
-Lis attentivement chaque ligne qui indique une date, une variété (ou catégorie de fruit), une quantité en kg et un prix.
+Lis attentivement chaque ligne qui indique une date, une catégorie/note de qualité, éventuellement une variété, une quantité en kg et un prix.
 
 Réponds UNIQUEMENT avec un tableau JSON strict, rien d'autre : pas de texte avant, pas de texte après, pas d'explication, pas de balises markdown. Format exact :
 [
-  {"date": "2026-08-05", "variete": "Kwanza", "kg": 45.5, "prixKg": 4.20},
-  {"date": "2026-08-05", "variete": "Vente directe", "kg": 12, "prixKg": 5.00}
+  {"date": "2026-08-05", "note": "E", "variete": "Kwanza", "kg": 45.5, "prixKg": 4.20},
+  {"date": "2026-08-05", "note": "IQF", "variete": "", "kg": 12, "prixKg": 5.00}
 ]
 
 Règles :
 - "date" au format AAAA-MM-JJ. Si une seule date apparaît pour tout le document, applique-la à toutes les lignes.
-- "variete" est le nom de la variété ou catégorie tel qu'écrit sur le document.
+- "note" est le code de catégorie/qualité tel qu'écrit sur le document (ex: E, A, B, C, IQF, "Vente directe"). Si le document n'a pas de catégorie de ce type, mets une chaîne vide "".
+- "variete" est le nom de la variété si elle est indiquée séparément de la catégorie ; sinon laisse une chaîne vide "".
 - "kg" et "prixKg" sont des nombres (utilise un point comme séparateur décimal, pas de virgule).
 - Si le document indique un montant total au lieu d'un prix au kg, calcule prixKg = montant / kg.
 - Ignore les lignes de total ou de sous-total, ne retourne que le détail ligne par ligne.
