@@ -261,6 +261,7 @@ function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
 function round2(n){ return Math.round(n*100)/100; }
 function normalizeNote(n){ return (n||'').trim().toUpperCase().replace(/^HS\s+/,''); }
+function normalizeDateStr(d){ return String(d||'').trim().slice(0,10); }
 function cueilleurLabel(n){ return (parseInt(n,10)===0) ? 'Non identifié (sans papier)' : 'Cueilleur n°'+n; }
 function timeToDecimal(t){ if(!t) return null; var parts = t.split(':'); return parseInt(parts[0],10) + parseInt(parts[1],10)/60; }
 
@@ -2117,6 +2118,23 @@ async function renderAdminVentes(){
     html += '</table>';
   }
 
+  var noNoteIdx = [];
+  bons.forEach(function(b, idx){ if(!normalizeNote(b.note)) noNoteIdx.push(idx); });
+  if(noNoteIdx.length){
+    html += '<div class="section-title">'+noNoteIdx.length+' ligne(s) sans note détectée — à corriger</div><div class="card">';
+    noNoteIdx.forEach(function(idx){
+      var b = bons[idx];
+      html += '<div style="padding:10px 0;border-bottom:1px solid var(--line);">' +
+        '<div class="muted" style="font-size:12px;margin-bottom:4px;">'+frDate(b.date)+' — '+b.kg+' kg'+(b.variete?' — '+b.variete.substring(0,60):'')+'</div>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<input type="text" data-fixidx="'+idx+'" placeholder="Note (ex: E, A, B, C, IQF)" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+          '<button class="btn btn-gold" style="width:auto;padding:8px 14px;" data-fixbtn="'+idx+'">Enregistrer</button>' +
+        '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
   if(bons.length){
     html += '<button class="btn btn-ghost" id="btnExportVentes">Exporter en Excel</button>';
   }
@@ -2124,6 +2142,21 @@ async function renderAdminVentes(){
   app.innerHTML = html;
 
   document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminMenu'; render(); };
+
+  document.querySelectorAll('button[data-fixbtn]').forEach(function(btn){
+    btn.onclick = async function(){
+      var idx = parseInt(btn.getAttribute('data-fixbtn'),10);
+      var input = document.querySelector('input[data-fixidx="'+idx+'"]');
+      var newNote = normalizeNote(input.value);
+      if(!newNote){ alert('Renseigne une note.'); return; }
+      var current = await getBonsApport();
+      if(!current[idx]){ alert('Cette ligne n\'existe plus, recharge la page.'); return; }
+      current[idx].note = newNote;
+      var ok = await saveBonsApport(current);
+      if(!ok){ alert('Erreur lors de l\'enregistrement.'); return; }
+      renderAdminVentes();
+    };
+  });
 
   document.getElementById('btnCleanupDoublons').onclick = async function(){
     var resultEl = document.getElementById('cleanupResult');
@@ -2133,8 +2166,9 @@ async function renderAdminVentes(){
     var order = [];
     all.forEach(function(b){
       var note = normalizeNote(b.note) || 'SANS NOTE';
-      var key = (b.date||'')+'|'+note;
-      if(!merged[key]){ merged[key] = { date: b.date||'', note: note, variete: b.variete||'', kg: 0, montant: 0, importeLe: new Date().toISOString() }; order.push(key); }
+      var d = normalizeDateStr(b.date);
+      var key = d+'|'+note;
+      if(!merged[key]){ merged[key] = { date: d, note: note, variete: b.variete||'', kg: 0, montant: 0, importeLe: new Date().toISOString() }; order.push(key); }
       merged[key].kg = round2(merged[key].kg + (parseFloat(b.kg)||0));
       merged[key].montant = round2(merged[key].montant + (parseFloat(b.montant)||0));
     });
@@ -2203,14 +2237,14 @@ async function renderAdminVentes(){
     // Détection des doublons : même date + même catégorie déjà présente dans les bons existants (la variété, texte trop variable, n'est plus prise en compte).
     var current = await getBonsApport();
     var existingKeys = {};
-    current.forEach(function(b){ existingKeys[(b.date||'')+'|'+normalizeNote(b.note)] = true; });
+    current.forEach(function(b){ existingKeys[normalizeDateStr(b.date)+'|'+normalizeNote(b.note)] = true; });
 
     var imported = [], skipped = [];
     groupOrder.forEach(function(key){
       var g = groups[key];
       var kg = g.kg;
       if(!kg) return;
-      var dupKey = (g.date||'')+'|'+g.note;
+      var dupKey = normalizeDateStr(g.date)+'|'+g.note;
       var label = g.note;
       if(existingKeys[dupKey]){
         skipped.push(label+' ('+g.date+')');
