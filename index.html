@@ -2033,6 +2033,8 @@ async function renderAdminVentes(){
     '<div class="worker-row"><span class="worker-name">Prix moyen général</span><span class="worker-hours">'+(totalKg?round2(totalMontant/totalKg):0)+' €/kg</span></div>' +
   '</div>';
   html += '<button class="btn btn-ghost" id="btnCleanupDoublons">Nettoyer les doublons existants (date + note)</button>';
+  html += '<button class="btn" id="btnResetVentes" style="background:var(--red);color:#fff;">Réinitialiser tous les bons d\'apport</button>';
+  html += '<div id="resetVentesResult" class="muted" style="text-align:center;"></div>';
   html += '<div id="cleanupResult" class="muted" style="text-align:center;"></div>';
 
   var bonDatesSet = {};
@@ -2184,6 +2186,21 @@ async function renderAdminVentes(){
     resultEl.textContent = removed>0 ? (removed+' doublon(s) fusionné(s), '+cleaned.length+' ligne(s) au final.') : 'Aucun doublon trouvé.';
     if(removed>0) renderAdminVentes();
   };
+
+  document.getElementById('btnResetVentes').onclick = async function(){
+    var current = await getBonsApport();
+    if(!current.length){ document.getElementById('resetVentesResult').textContent = 'Aucun bon d\'apport à supprimer.'; return; }
+    var sure1 = confirm('Supprimer DÉFINITIVEMENT les '+current.length+' bon(s) d\'apport enregistrés (kg, prix, notes, historique) ? Cette action est irréversible.');
+    if(!sure1) return;
+    var sure2 = confirm('Dernière confirmation : es-tu sûr de vouloir tout réinitialiser ? Pense à exporter en Excel avant si tu veux garder une trace.');
+    if(!sure2) return;
+    var resultEl = document.getElementById('resetVentesResult');
+    resultEl.textContent = 'Réinitialisation en cours…';
+    var ok = await saveBonsApport([]);
+    resultEl.textContent = ok ? 'Tous les bons d\'apport ont été supprimés.' : 'Erreur lors de la réinitialisation.';
+    if(ok) renderAdminVentes();
+  };
+
   document.getElementById('venteCalMonthPick').addEventListener('change', function(){
     state.venteCalMonth = this.value;
     renderAdminVentes();
