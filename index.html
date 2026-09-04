@@ -235,7 +235,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg' };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -2236,6 +2236,7 @@ async function renderAdminAgroVue(){
 async function renderAdminRythme(){
   headerTitle.textContent = 'Rythme de cueillette';
   var date = state.rythmeDate || todayISO();
+  var sortBy = state.rythmeSortBy || 'kg';
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var workers = await getWorkers();
   var numToWorker = {};
@@ -2256,13 +2257,11 @@ async function renderAdminRythme(){
     });
   });
 
-  var nums = Object.keys(perCueilleurPerDay).map(Number).sort(function(a,b){
-    return (perCueilleurPerDay[b][6]||0) - (perCueilleurPerDay[a][6]||0);
-  });
+  var allNums = Object.keys(perCueilleurPerDay).map(Number);
 
   var kgHByNum = {};
-  for(var i=0;i<nums.length;i++){
-    var n = nums[i];
+  for(var i=0;i<allNums.length;i++){
+    var n = allNums[i];
     var w = numToWorker[n];
     if(w){
       var entries = await getEntries(w.id);
@@ -2275,8 +2274,25 @@ async function renderAdminRythme(){
     }
   }
 
+  var nums = allNums.sort(function(a,b){
+    if(sortBy==='kgh'){
+      var kgHa = kgHByNum[a], kgHb = kgHByNum[b];
+      if(kgHa===null && kgHb===null) return (perCueilleurPerDay[b][6]||0)-(perCueilleurPerDay[a][6]||0);
+      if(kgHa===null) return 1;
+      if(kgHb===null) return -1;
+      return kgHb - kgHa;
+    }
+    return (perCueilleurPerDay[b][6]||0) - (perCueilleurPerDay[a][6]||0);
+  });
+
   var html = '<button class="btn btn-ghost" id="btnBackRythme">‹ Retour au menu</button>';
-  html += '<div class="card" style="margin-top:14px;"><label>Date</label><input type="date" id="rythmeDatePick" value="'+date+'" max="'+todayISO()+'"></div>';
+  html += '<div class="card stack" style="margin-top:14px;">' +
+    '<div><label>Date</label><input type="date" id="rythmeDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
+    '<div><label>Classement décroissant par</label><select id="rythmeSortPick">' +
+      '<option value="kg"'+(sortBy==='kg'?' selected':'')+'>Kg du jour</option>' +
+      '<option value="kgh"'+(sortBy==='kgh'?' selected':'')+'>Kg/h (rendement)</option>' +
+    '</select></div>' +
+  '</div>';
   html += '<p class="muted" style="margin:0 0 10px;">Numéros visibles ici uniquement — jamais côté trieur ni côté salarié. Le kg/h se calcule uniquement pour les cueilleurs reliés à un compte, à partir de leurs heures pointées ce jour-là.</p>';
 
   if(!nums.length){
@@ -2284,7 +2300,7 @@ async function renderAdminRythme(){
   } else {
     var maxKg = Math.max.apply(null, nums.map(function(n){ return Math.max.apply(null, perCueilleurPerDay[n]); }).concat([0.1]));
     html += '<div class="card">';
-    nums.forEach(function(n){
+    nums.forEach(function(n, rank){
       var w = numToWorker[n];
       var label = w ? w.prenom : ('N°'+n+' (compte non lié)');
       var todayKg = round2(perCueilleurPerDay[n][6]||0);
@@ -2294,7 +2310,7 @@ async function renderAdminRythme(){
         return '<div style="width:9px;height:'+h+'px;background:var(--gold);border-radius:2px;display:inline-block;margin-right:2px;vertical-align:bottom;"></div>';
       }).join('');
       html += '<div class="worker-row" style="align-items:center;">' +
-        '<span class="worker-name">'+label+'<br><span class="muted" style="font-weight:400;font-size:11px;">tendance 7 jours</span></span>' +
+        '<span class="worker-name">'+(rank+1)+'. '+label+'<br><span class="muted" style="font-weight:400;font-size:11px;">tendance 7 jours</span></span>' +
         '<span style="text-align:right;">' +
           '<div style="height:30px;">'+bars+'</div>' +
           '<span class="muted" style="font-size:12px;">'+todayKg+' kg — '+(kgH!==null?kgH+' kg/h':'kg/h non calculable')+'</span>' +
@@ -2302,6 +2318,7 @@ async function renderAdminRythme(){
       '</div>';
     });
     html += '</div>';
+    html += '<button class="btn btn-gold" id="btnExportRythme">Exporter en Excel</button>';
   }
 
   app.innerHTML = html;
@@ -2310,6 +2327,26 @@ async function renderAdminRythme(){
     state.rythmeDate = this.value;
     renderAdminRythme();
   });
+  document.getElementById('rythmeSortPick').addEventListener('change', function(){
+    state.rythmeSortBy = this.value;
+    renderAdminRythme();
+  });
+
+  var exportBtn = document.getElementById('btnExportRythme');
+  if(exportBtn) exportBtn.onclick = function(){
+    var wb = XLSX.utils.book_new();
+    var rows = [['Rang','Cueilleur','N°','Kg du jour','Kg/h', dateList[0]+' (kg)', dateList[1]+' (kg)', dateList[2]+' (kg)', dateList[3]+' (kg)', dateList[4]+' (kg)', dateList[5]+' (kg)', dateList[6]+' (kg)']];
+    nums.forEach(function(n, rank){
+      var w = numToWorker[n];
+      var label = w ? w.prenom : 'Non lié';
+      var row = [rank+1, label, n, round2(perCueilleurPerDay[n][6]||0), kgHByNum[n]!==null?kgHByNum[n]:''];
+      perCueilleurPerDay[n].forEach(function(kg){ row.push(kg); });
+      rows.push(row);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Rythme cueillette');
+    XLSX.writeFile(wb, 'Rythme_cueillette_'+date+'.xlsx');
+  };
 }
 
 function exportExcel(allData, mods){
@@ -2366,7 +2403,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg' }; render(); };
 
 render();
 })();
