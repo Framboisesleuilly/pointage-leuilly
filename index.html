@@ -131,6 +131,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script>
 (function(){
 
@@ -166,6 +167,12 @@ async function saveBarquettes(date, list){
     var r = await fetch('/api/barquettes?date='+date, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)});
     return r.ok;
   }catch(err){ return false; }
+}
+async function getPlantsParAnnee(){
+  try{ var r = await fetch('/api/plants-annee'); return r.ok ? await r.json() : {}; }catch(err){ return {}; }
+}
+async function savePlantsParAnnee(data){
+  try{ var r = await fetch('/api/plants-annee', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)}); return r.ok; }catch(err){ return false; }
 }
 async function getSecteurs(){
   try{ var r = await fetch('/api/secteurs'); return r.ok ? await r.json() : []; }catch(err){ return []; }
@@ -2003,6 +2010,7 @@ async function renderAdminVentes(){
   headerTitle.textContent = 'Ventes';
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var allBons = await getBonsApport();
+  var plantsParAnnee = await getPlantsParAnnee();
 
   // Comparatif toutes années confondues (jamais filtré)
   var byYear = {};
@@ -2014,6 +2022,27 @@ async function renderAdminVentes(){
     byYear[y].montant = round2(byYear[y].montant + (parseFloat(b.montant)||0));
   });
   var years = Object.keys(byYear).sort();
+
+  var byYearNote = {};
+  var allNoteKeysSet = {};
+  allBons.forEach(function(b){
+    var y = normalizeDateStr(b.date).slice(0,4);
+    if(!/^\d{4}$/.test(y)) return;
+    var n = resolveNote(b.note, b.variete);
+    if(!n) return;
+    allNoteKeysSet[n] = true;
+    if(!byYearNote[y]) byYearNote[y] = {};
+    byYearNote[y][n] = round2((byYearNote[y][n]||0) + (parseFloat(b.kg)||0));
+  });
+
+  function baseNoteCodeGlobal(n){ return n.replace(/^HS\s+/i,'').trim(); }
+  var noteOrderGlobal = ['E','A','B','C','IQF'];
+  var allNoteKeys = Object.keys(allNoteKeysSet).sort(function(a,b){
+    var ba = baseNoteCodeGlobal(a), bb = baseNoteCodeGlobal(b);
+    var ia = noteOrderGlobal.indexOf(ba), ib = noteOrderGlobal.indexOf(bb);
+    if(ia !== ib){ if(ia===-1) return 1; if(ib===-1) return -1; return ia-ib; }
+    return a.localeCompare(b);
+  });
 
   var yearFilter = state.venteYearFilter || 'all';
   var bons = (yearFilter==='all') ? allBons : allBons.filter(function(b){ return normalizeDateStr(b.date).slice(0,4)===yearFilter; });
@@ -2062,13 +2091,28 @@ async function renderAdminVentes(){
     '</select></div>';
 
     html += '<div class="section-title">Totaux par année</div>';
-    html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:16px;">' +
-      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Année</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Montant €</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Prix moyen €/kg</th></tr>';
     years.forEach(function(y){
       var prixMoyen = byYear[y].kg ? round2(byYear[y].montant/byYear[y].kg) : 0;
-      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">'+y+'</td><td style="text-align:right;padding:10px 14px;">'+byYear[y].kg+'</td><td style="text-align:right;padding:10px 14px;">'+byYear[y].montant+'</td><td style="text-align:right;padding:10px 14px;">'+prixMoyen+'</td></tr>';
+      var nbPlants = plantsParAnnee[y] || '';
+      var rendementPlant = (nbPlants && parseFloat(nbPlants)>0) ? round2(byYear[y].kg/parseFloat(nbPlants)) : null;
+      html += '<div class="card stack">' +
+        '<div class="worker-name">'+y+'</div>' +
+        '<div class="worker-row"><span class="muted">Kg</span><span class="worker-hours">'+byYear[y].kg+'</span></div>' +
+        '<div class="worker-row"><span class="muted">Montant</span><span class="worker-hours">'+byYear[y].montant+' €</span></div>' +
+        '<div class="worker-row"><span class="muted">Prix moyen</span><span class="worker-hours">'+prixMoyen+' €/kg</span></div>' +
+        '<div><label>Nombre de plants en '+y+'</label><input type="number" min="0" data-plantsyear="'+y+'" value="'+nbPlants+'" placeholder="Ex: 5000"></div>' +
+        '<div class="worker-row"><span class="muted">Rendement par plant</span><span class="worker-hours">'+(rendementPlant!==null?rendementPlant+' kg/plant':'—')+'</span></div>' +
+      '</div>';
     });
-    html += '</table>';
+
+    html += '<div class="section-title">Graphiques</div>';
+    html += '<div class="card"><canvas id="chartVolumePrix" height="220"></canvas></div>';
+    if(allNoteKeys.length){
+      html += '<div class="card"><canvas id="chartCategories" height="220"></canvas></div>';
+    }
+    if(years.some(function(y){ return plantsParAnnee[y]>0; })){
+      html += '<div class="card"><canvas id="chartRendement" height="220"></canvas></div>';
+    }
   }
 
   html += '<div class="section-title">Importer un bon d\'apport — PDF ou photo</div>';
@@ -2130,6 +2174,65 @@ async function renderAdminVentes(){
   app.innerHTML = html;
 
   document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminMenu'; render(); };
+
+  if(window.Chart && years.length){
+    var chartColors = ['#33502E','#C89B3C','#A32638','#66655B','#8FA37E','#D6B68A','#5C7A8A'];
+
+    var elVolPrix = document.getElementById('chartVolumePrix');
+    if(elVolPrix){
+      new Chart(elVolPrix, {
+        data: {
+          labels: years,
+          datasets: [
+            { type:'bar', label:'Kg', data: years.map(function(y){return byYear[y].kg;}), backgroundColor:'#33502E', yAxisID:'y' },
+            { type:'line', label:'Prix moyen €/kg', data: years.map(function(y){return byYear[y].kg?round2(byYear[y].montant/byYear[y].kg):0;}), borderColor:'#C89B3C', backgroundColor:'#C89B3C', yAxisID:'y1', tension:0.2 }
+          ]
+        },
+        options: {
+          responsive:true,
+          plugins:{ title:{ display:true, text:'Volume et prix moyen par année' } },
+          scales:{
+            y:{ position:'left', title:{display:true,text:'Kg'} },
+            y1:{ position:'right', title:{display:true,text:'€/kg'}, grid:{drawOnChartArea:false} }
+          }
+        }
+      });
+    }
+
+    var elCat = document.getElementById('chartCategories');
+    if(elCat && allNoteKeys.length){
+      new Chart(elCat, {
+        type:'bar',
+        data: {
+          labels: years,
+          datasets: allNoteKeys.map(function(n, i){
+            return { label:n, data: years.map(function(y){ return (byYearNote[y]&&byYearNote[y][n])||0; }), backgroundColor: chartColors[i%chartColors.length] };
+          })
+        },
+        options: {
+          responsive:true,
+          plugins:{ title:{ display:true, text:'Kg par catégorie et par année' } },
+          scales:{ y:{ title:{display:true,text:'Kg'} } }
+        }
+      });
+    }
+
+    var elRend = document.getElementById('chartRendement');
+    if(elRend){
+      new Chart(elRend, {
+        type:'bar',
+        data: {
+          labels: years,
+          datasets: [{ label:'Kg/plant', data: years.map(function(y){ var np=plantsParAnnee[y]; return (np>0)?round2(byYear[y].kg/np):0; }), backgroundColor:'#5C7A8A' }]
+        },
+        options: {
+          responsive:true,
+          plugins:{ title:{ display:true, text:'Rendement par plant, par année' } },
+          scales:{ y:{ title:{display:true,text:'Kg/plant'} } }
+        }
+      });
+    }
+  }
 
   document.querySelectorAll('button[data-fixbtn]').forEach(function(btn){
     btn.onclick = async function(){
@@ -2201,6 +2304,18 @@ async function renderAdminVentes(){
   if(yearPick) yearPick.addEventListener('change', function(){
     state.venteYearFilter = this.value;
     renderAdminVentes();
+  });
+
+  document.querySelectorAll('input[data-plantsyear]').forEach(function(inp){
+    inp.addEventListener('change', async function(){
+      var y = this.getAttribute('data-plantsyear');
+      var val = parseInt(this.value, 10);
+      var current = await getPlantsParAnnee();
+      if(val>0) current[y] = val; else delete current[y];
+      var ok = await savePlantsParAnnee(current);
+      if(!ok){ alert('Erreur lors de l\'enregistrement.'); return; }
+      renderAdminVentes();
+    });
   });
 
   document.getElementById('btnAnalyzeVentePdf').onclick = async function(){
@@ -2303,10 +2418,12 @@ async function renderAdminVentes(){
     }
 
     if(years.length){
-      var yearRows = [['Année','Kg','Montant €','Prix moyen €/kg']];
+      var yearRows = [['Année','Kg','Montant €','Prix moyen €/kg','Nombre de plants','Rendement kg/plant']];
       years.forEach(function(y){
         var pm = byYear[y].kg ? round2(byYear[y].montant/byYear[y].kg) : 0;
-        yearRows.push([y, byYear[y].kg, byYear[y].montant, pm]);
+        var np = plantsParAnnee[y] || '';
+        var rp = (np && parseFloat(np)>0) ? round2(byYear[y].kg/parseFloat(np)) : '';
+        yearRows.push([y, byYear[y].kg, byYear[y].montant, pm, np, rp]);
       });
       var wsYears = XLSX.utils.aoa_to_sheet(yearRows);
       XLSX.utils.book_append_sheet(wb, wsYears, 'Comparatif années');
