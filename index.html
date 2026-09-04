@@ -2260,9 +2260,24 @@ async function renderAdminRythme(){
     return (perCueilleurPerDay[b][6]||0) - (perCueilleurPerDay[a][6]||0);
   });
 
+  var kgHByNum = {};
+  for(var i=0;i<nums.length;i++){
+    var n = nums[i];
+    var w = numToWorker[n];
+    if(w){
+      var entries = await getEntries(w.id);
+      var dayEntry = entries[date];
+      var heures = dayEntry ? computeTotal(dayEntry) : null;
+      var todayKg = perCueilleurPerDay[n][6]||0;
+      kgHByNum[n] = (heures && heures>0) ? round2(todayKg/heures) : null;
+    } else {
+      kgHByNum[n] = null;
+    }
+  }
+
   var html = '<button class="btn btn-ghost" id="btnBackRythme">‹ Retour au menu</button>';
   html += '<div class="card" style="margin-top:14px;"><label>Date</label><input type="date" id="rythmeDatePick" value="'+date+'" max="'+todayISO()+'"></div>';
-  html += '<p class="muted" style="margin:0 0 10px;">Numéros visibles ici uniquement — jamais côté trieur ni côté salarié.</p>';
+  html += '<p class="muted" style="margin:0 0 10px;">Numéros visibles ici uniquement — jamais côté trieur ni côté salarié. Le kg/h se calcule uniquement pour les cueilleurs reliés à un compte, à partir de leurs heures pointées ce jour-là.</p>';
 
   if(!nums.length){
     html += '<p class="muted">Aucune saisie de tri sur les 7 derniers jours.</p>';
@@ -2273,6 +2288,7 @@ async function renderAdminRythme(){
       var w = numToWorker[n];
       var label = w ? w.prenom : ('N°'+n+' (compte non lié)');
       var todayKg = round2(perCueilleurPerDay[n][6]||0);
+      var kgH = kgHByNum[n];
       var bars = perCueilleurPerDay[n].map(function(kg){
         var h = Math.max(2, Math.round((kg/maxKg)*28));
         return '<div style="width:9px;height:'+h+'px;background:var(--gold);border-radius:2px;display:inline-block;margin-right:2px;vertical-align:bottom;"></div>';
@@ -2281,7 +2297,7 @@ async function renderAdminRythme(){
         '<span class="worker-name">'+label+'<br><span class="muted" style="font-weight:400;font-size:11px;">tendance 7 jours</span></span>' +
         '<span style="text-align:right;">' +
           '<div style="height:30px;">'+bars+'</div>' +
-          '<span class="muted" style="font-size:12px;">'+todayKg+' kg ce jour</span>' +
+          '<span class="muted" style="font-size:12px;">'+todayKg+' kg — '+(kgH!==null?kgH+' kg/h':'kg/h non calculable')+'</span>' +
         '</span>' +
       '</div>';
     });
