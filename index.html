@@ -263,6 +263,7 @@ function round2(n){ return Math.round(n*100)/100; }
 function normalizeNote(n){ return (n||'').trim().toUpperCase().replace(/^HS\s+/,''); }
 function resolveNote(note, variete){
   var n = normalizeNote(note);
+  if(n === 'IQF' || /\bIQF\b/i.test(n)) return 'IQF';
   if(n) return n;
   if(/\bIQF\b/i.test(variete||'')) return 'IQF';
   return '';
@@ -2091,77 +2092,6 @@ async function renderAdminVentes(){
   html += '<div id="resetVentesResult" class="muted" style="text-align:center;"></div>';
   html += '<div id="cleanupResult" class="muted" style="text-align:center;"></div>';
 
-  var bonDatesSet = {};
-  var bonDatesList = [];
-  bons.forEach(function(b){
-    if(!b.date) return;
-    var d = String(b.date).trim().slice(0,10);
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
-    bonDatesSet[d] = true;
-    bonDatesList.push(d);
-  });
-  bonDatesList.sort();
-
-  var defaultMonth = bonDatesList.length ? bonDatesList[bonDatesList.length-1].slice(0,7) : todayISO().slice(0,7);
-  var calMonth = state.venteCalMonth || defaultMonth;
-  html += '<div class="section-title">Suivi des dates de livraison</div>';
-  html += '<div class="card">';
-  html += '<div style="margin-bottom:10px;"><input type="month" id="venteCalMonthPick" value="'+calMonth+'"></div>';
-  if(!bonDatesList.length){
-    html += '<p class="muted">Aucun bon d\'apport importé pour l\'instant.</p></div>';
-  } else {
-
-  var ymParts = calMonth.split('-');
-  var year = parseInt(ymParts[0],10), month = parseInt(ymParts[1],10);
-  var firstOfMonth = new Date(Date.UTC(year, month-1, 1));
-  var daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  var startOffset = (firstOfMonth.getUTCDay()+6)%7; // lundi=0
-
-  html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;">';
-  ['L','M','M','J','V','S','D'].forEach(function(l){ html += '<div class="muted" style="font-size:11px;padding:4px 0;">'+l+'</div>'; });
-  for(var i=0;i<startOffset;i++){ html += '<div></div>'; }
-  for(var day=1;day<=daysInMonth;day++){
-    var dStr = calMonth+'-'+String(day).padStart(2,'0');
-    var hasBon = !!bonDatesSet[dStr];
-    html += '<div style="padding:8px 0;border-radius:8px;font-size:13px;font-weight:600;background:'+(hasBon?'var(--moss)':'var(--bg)')+';color:'+(hasBon?'#fff':'var(--ink)')+';">'+day+'</div>';
-  }
-  html += '</div>';
-  html += '<p class="muted" style="margin-top:10px;font-size:12px;">En vert : jour avec au moins un bon d\'apport enregistré.</p>';
-  html += '</div>';
-  } // fin du else (bonDatesList.length)
-
-  if(bonDatesList.length >= 2){
-    var gaps = [];
-    var minD = new Date(bonDatesList[0]+'T00:00:00Z');
-    var maxD = new Date(bonDatesList[bonDatesList.length-1]+'T00:00:00Z');
-    var gapStart = null, prevStr = null;
-    for(var gd = new Date(minD); gd <= maxD; gd.setUTCDate(gd.getUTCDate()+1)){
-      var gdStr = gd.toISOString().slice(0,10);
-      if(!bonDatesSet[gdStr]){
-        if(!gapStart) gapStart = gdStr;
-      } else if(gapStart){
-        gaps.push([gapStart, prevStr]);
-        gapStart = null;
-      }
-      prevStr = gdStr;
-    }
-    if(gapStart) gaps.push([gapStart, prevStr]);
-
-    html += '<div class="section-title">Jours sans bon entre deux livraisons</div>';
-    if(gaps.length){
-      html += '<div class="card">';
-      gaps.forEach(function(g){
-        var label = (g[0]===g[1]) ? frDate(g[0]) : (frDate(g[0])+' → '+frDate(g[1]));
-        var nbJours = Math.round((new Date(g[1]+'T00:00:00Z')-new Date(g[0]+'T00:00:00Z'))/86400000)+1;
-        html += '<div class="worker-row"><span class="worker-name">'+label+'</span><span class="muted">'+nbJours+' jour(s)</span></div>';
-      });
-      html += '</div>';
-      html += '<p class="muted" style="font-size:12px;">Entre le '+frDate(bonDatesList[0])+' (première livraison) et le '+frDate(bonDatesList[bonDatesList.length-1])+' (dernière). Un trou ici ne veut pas forcément dire qu\'un bon manque — il se peut simplement qu\'il n\'y ait pas eu de récolte ce jour-là.</p>';
-    } else {
-      html += '<div class="banner ok">Aucun trou : un bon existe pour chaque jour entre la première et la dernière livraison.</div>';
-    }
-  }
-
   if(noteKeys.length){
     html += '<div class="section-title">Par note</div>';
     html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;">' +
@@ -2277,12 +2207,6 @@ async function renderAdminVentes(){
   var yearPick = document.getElementById('venteYearPick');
   if(yearPick) yearPick.addEventListener('change', function(){
     state.venteYearFilter = this.value;
-    renderAdminVentes();
-  });
-
-  var calMonthPick = document.getElementById('venteCalMonthPick');
-  if(calMonthPick) calMonthPick.addEventListener('change', function(){
-    state.venteCalMonth = this.value;
     renderAdminVentes();
   });
 
