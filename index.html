@@ -87,6 +87,23 @@
     body{background:#fff;}
     .wrap{max-width:none;}
   }
+  .rank-card{display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line);}
+  .rank-card:last-child{border-bottom:none;}
+  .rank-badge{flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;background:var(--bg);color:var(--ink-soft);}
+  .rank-badge.gold{background:var(--gold);color:#3A2C0E;}
+  .rank-badge.silver{background:#D9D5C7;color:#3A2C0E;}
+  .rank-badge.bronze{background:#D6B68A;color:#3A2C0E;}
+  .rank-info{flex:1;min-width:0;}
+  .rank-name{font-size:16px;font-weight:700;color:var(--ink);}
+  .rank-stats{display:flex;gap:14px;margin-top:2px;}
+  .rank-stat-val{font-size:15px;font-weight:700;color:var(--moss);}
+  .rank-stat-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);}
+  .trend-bars{display:flex;align-items:flex-end;gap:3px;height:34px;}
+  .trend-bar{width:10px;border-radius:2px 2px 0 0;background:var(--line);}
+  .trend-bar.today{background:var(--gold);}
+  .kpi-card{background:var(--moss);color:#fff;border-radius:14px;padding:20px;text-align:center;margin-bottom:16px;}
+  .kpi-card .kpi-val{font-size:32px;font-weight:800;}
+  .kpi-card .kpi-lbl{font-size:13px;opacity:.85;margin-top:2px;}
 </style>
 </head>
 <body>
@@ -1990,9 +2007,9 @@ async function renderAdminVentes(){
 
   html += '<div class="section-title">Importer un bon d\'apport — PDF ou photo</div>';
   html += '<div class="card stack">' +
-    '<p class="muted">Dépose directement le bon d\'apport reçu (PDF ou photo). L\'IA lit les lignes, à vérifier avant import.</p>' +
-    '<div><label>Fichier</label><input type="file" id="ventePdfFile" accept="image/*,.pdf,application/pdf"></div>' +
-    '<button class="btn btn-gold" id="btnAnalyzeVentePdf">Analyser</button>' +
+    '<p class="muted">Dépose directement le(s) bon(s) d\'apport reçu(s) — plusieurs à la fois si besoin. L\'IA lit et importe automatiquement, regroupé par variété, en évitant les doublons (même date + même variété déjà importée).</p>' +
+    '<div><label>Fichier(s)</label><input type="file" id="ventePdfFile" accept="image/*,.pdf,application/pdf" multiple></div>' +
+    '<button class="btn btn-gold" id="btnAnalyzeVentePdf">Analyser et importer</button>' +
     '<div id="ventePdfResult" class="muted"></div>' +
   '</div>' +
   '<div id="ventePdfReview"></div>';
@@ -2000,13 +2017,15 @@ async function renderAdminVentes(){
   html += '<div class="card">' +
     '<div class="worker-row"><span class="worker-name">Total kg vendus</span><span class="worker-hours">'+totalKg+' kg</span></div>' +
     '<div class="worker-row"><span class="worker-name">Total montant</span><span class="worker-hours">'+totalMontant+' €</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Prix moyen général</span><span class="worker-hours">'+(totalKg?round2(totalMontant/totalKg):0)+' €/kg</span></div>' +
   '</div>';
 
   var varieteKeys = Object.keys(byVariete);
   if(varieteKeys.length){
-    html += '<div class="section-title">Par variété</div><div class="card">';
+    html += '<div class="section-title">Par variété / catégorie</div><div class="card">';
     varieteKeys.forEach(function(v){
-      html += '<div class="worker-row"><span class="worker-name">'+v+'</span><span class="worker-hours">'+byVariete[v].kg+' kg — '+byVariete[v].montant+' €</span></div>';
+      var prixMoyen = byVariete[v].kg ? round2(byVariete[v].montant / byVariete[v].kg) : 0;
+      html += '<div class="worker-row"><span class="worker-name">'+v+'<br><span class="muted" style="font-weight:400;font-size:12px;">prix moyen '+prixMoyen+' €/kg</span></span><span class="worker-hours">'+byVariete[v].kg+' kg — '+byVariete[v].montant+' €</span></div>';
     });
     html += '</div>';
   }
@@ -2020,71 +2039,77 @@ async function renderAdminVentes(){
   document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminAgroMenu'; render(); };
 
   document.getElementById('btnAnalyzeVentePdf').onclick = async function(){
-    var file = document.getElementById('ventePdfFile').files[0];
+    var files = Array.from(document.getElementById('ventePdfFile').files);
     var resultEl = document.getElementById('ventePdfResult');
-    if(!file){ alert('Choisis un fichier.'); return; }
-    resultEl.textContent = 'Analyse en cours… (peut prendre 10-20 secondes)';
+    if(!files.length){ alert('Choisis au moins un fichier.'); return; }
     document.getElementById('ventePdfReview').innerHTML = '';
-    try{
-      file = await ensureCompatibleImage(file);
-      var base64 = await fileToBase64(file);
-      var r = await fetch('/api/analyze-document', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'application/pdf', mode: 'bonApport' })
-      });
-      var data = await r.json();
-      if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error||'inconnue'); return; }
-      var lignes = data.resultats || [];
-      if(!lignes.length){ resultEl.textContent = 'Aucune ligne détectée.'; return; }
-      resultEl.textContent = lignes.length + ' ligne(s) détectée(s) — vérifie avant de confirmer.';
-      renderVentePdfReview(lignes);
-    }catch(err){
-      resultEl.textContent = 'Erreur : ' + err.message;
+    var allLignes = [];
+    var errors = [];
+    for(var i=0;i<files.length;i++){
+      resultEl.textContent = 'Analyse du fichier '+(i+1)+'/'+files.length+' ("'+files[i].name+'")… (peut prendre 10-20 secondes)';
+      try{
+        var file = await ensureCompatibleImage(files[i]);
+        var base64 = await fileToBase64(file);
+        var r = await fetch('/api/analyze-document', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'application/pdf', mode: 'bonApport' })
+        });
+        var data = await r.json();
+        if(!r.ok || data.error){ errors.push(files[i].name+' : '+(data.error||'erreur inconnue')); continue; }
+        var lignes = data.resultats || [];
+        allLignes = allLignes.concat(lignes);
+      }catch(err){
+        errors.push(files[i].name+' : '+err.message);
+      }
     }
+    if(!allLignes.length){
+      resultEl.textContent = 'Aucune ligne détectée.' + (errors.length ? ' Erreurs : '+errors.join(' / ') : '');
+      return;
+    }
+
+    // Regroupe par variété : kg total et prix moyen pondéré.
+    var groups = {};
+    var groupOrder = [];
+    allLignes.forEach(function(l){
+      var v = (l.variete || 'Non précisé').trim();
+      if(!groups[v]){ groups[v] = { variete: v, date: l.date||'', kg: 0, montant: 0 }; groupOrder.push(v); }
+      var kg = parseFloat(l.kg)||0;
+      var prix = parseFloat(l.prixKg)||0;
+      groups[v].kg = round2(groups[v].kg + kg);
+      groups[v].montant = round2(groups[v].montant + kg*prix);
+      if(l.date && l.date > groups[v].date) groups[v].date = l.date;
+    });
+
+    // Détection des doublons : même date + même variété déjà présente dans les bons existants.
+    var current = await getBonsApport();
+    var existingKeys = {};
+    current.forEach(function(b){ existingKeys[(b.date||'')+'|'+(b.variete||'').trim().toLowerCase()] = true; });
+
+    var imported = [], skipped = [];
+    groupOrder.forEach(function(v){
+      var g = groups[v];
+      var kg = g.kg;
+      if(!kg) return;
+      var key = (g.date||'')+'|'+v.toLowerCase();
+      if(existingKeys[key]){
+        skipped.push(v+' ('+g.date+')');
+        return;
+      }
+      var prix = kg ? round2(g.montant/kg) : 0;
+      current.push({ date: g.date, variete: v, kg: kg, prixKg: prix, montant: round2(kg*prix), importeLe: new Date().toISOString(), importeDePdf: true });
+      imported.push(v+' — '+kg+' kg à '+prix+' €/kg');
+    });
+
+    var ok = imported.length ? await saveBonsApport(current) : true;
+    var msg = '';
+    if(imported.length) msg += imported.length + ' variété(s) importée(s) : ' + imported.join(' / ') + '. ';
+    if(skipped.length) msg += skipped.length + ' doublon(s) ignoré(s) (déjà importé pour cette date) : ' + skipped.join(' / ') + '. ';
+    if(errors.length) msg += errors.length + ' fichier(s) en erreur : ' + errors.join(' / ') + '.';
+    if(!ok) msg = 'Erreur lors de l\'enregistrement.';
+    resultEl.textContent = msg || 'Rien à importer.';
+    if(ok && imported.length) renderAdminVentes();
   };
-
-  function renderVentePdfReview(lignes){
-    var html2 = '<div class="section-title">Vérification avant import</div><div class="card">';
-    lignes.forEach(function(l, idx){
-      html2 += '<div style="padding:10px 0;border-bottom:1px solid var(--line);">' +
-        '<div class="grid2">' +
-          '<input type="date" data-f="date" data-idx="'+idx+'" value="'+(l.date||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
-          '<input type="text" data-f="variete" data-idx="'+idx+'" value="'+(l.variete||'')+'" placeholder="Variété" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
-        '</div>' +
-        '<div class="grid2" style="margin-top:6px;">' +
-          '<input type="number" step="0.01" data-f="kg" data-idx="'+idx+'" value="'+(l.kg||'')+'" placeholder="Kg" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
-          '<input type="number" step="0.01" data-f="prixKg" data-idx="'+idx+'" value="'+(l.prixKg||'')+'" placeholder="Prix €/kg" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
-        '</div>' +
-      '</div>';
-    });
-    html2 += '</div><button class="btn btn-gold" id="btnConfirmVenteImport">Confirmer et importer ces '+lignes.length+' ligne(s)</button><div id="venteConfirmResult" class="muted"></div>';
-    document.getElementById('ventePdfReview').innerHTML = html2;
-
-    document.querySelectorAll('#ventePdfReview input[data-f]').forEach(function(inp){
-      inp.addEventListener('change', function(){
-        var idx = parseInt(this.getAttribute('data-idx'),10);
-        var f = this.getAttribute('data-f');
-        lignes[idx][f] = this.value;
-      });
-    });
-
-    document.getElementById('btnConfirmVenteImport').onclick = async function(){
-      var current = await getBonsApport();
-      var count = 0;
-      lignes.forEach(function(l){
-        var kg = parseFloat(l.kg)||0;
-        var prix = parseFloat(l.prixKg)||0;
-        if(!kg) return;
-        current.push({ date: l.date, variete: l.variete||'', kg: kg, prixKg: prix, montant: round2(kg*prix), importeLe: new Date().toISOString(), importeDePdf: true });
-        count++;
-      });
-      var ok = await saveBonsApport(current);
-      var confirmEl = document.getElementById('venteConfirmResult');
-      confirmEl.textContent = ok ? (count + ' ligne(s) importée(s) avec succès.') : 'Erreur lors de l\'enregistrement.';
-      if(ok) renderAdminVentes();
-    };
-  }
 
   document.getElementById('btnImportVentes').onclick = async function(){
     var file = document.getElementById('venteFile').files[0];
@@ -2239,12 +2264,16 @@ async function renderAdminRythme(){
   var sortBy = state.rythmeSortBy || 'kg';
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var workers = await getWorkers();
+  var secteurs = await getSecteurs();
   var numToWorker = {};
   workers.forEach(function(w){ if(w.numeroCueilleur) numToWorker[w.numeroCueilleur] = w; });
+
+  var totalPlants = secteurs.reduce(function(s, sec){ return s + ((parseFloat(sec.potsParLigne)||0) * (parseFloat(sec.nombreLignes)||0)); }, 0);
 
   var dateList = [];
   var d0 = new Date(date+'T00:00:00Z');
   for(var i=6;i>=0;i--){ var dd = new Date(d0); dd.setUTCDate(dd.getUTCDate()-i); dateList.push(dd.toISOString().slice(0,10)); }
+  var joursLabels = dateList.map(function(d){ var dt = new Date(d+'T00:00:00Z'); return ['D','L','M','M','J','V','S'][dt.getUTCDay()]; });
   var listsPerDay = await Promise.all(dateList.map(function(dd){ return getBarquettes(dd); }));
 
   var perCueilleurPerDay = {};
@@ -2258,6 +2287,8 @@ async function renderAdminRythme(){
   });
 
   var allNums = Object.keys(perCueilleurPerDay).map(Number);
+  var totalKgToday = round2(allNums.reduce(function(s,n){ return s + (perCueilleurPerDay[n][6]||0); }, 0));
+  var rendementPied = totalPlants>0 ? round2(totalKgToday/totalPlants) : null;
 
   var kgHByNum = {};
   for(var i=0;i<allNums.length;i++){
@@ -2274,7 +2305,7 @@ async function renderAdminRythme(){
     }
   }
 
-  var nums = allNums.sort(function(a,b){
+  function sortFn(a,b){
     if(sortBy==='kgh'){
       var kgHa = kgHByNum[a], kgHb = kgHByNum[b];
       if(kgHa===null && kgHb===null) return (perCueilleurPerDay[b][6]||0)-(perCueilleurPerDay[a][6]||0);
@@ -2283,41 +2314,72 @@ async function renderAdminRythme(){
       return kgHb - kgHa;
     }
     return (perCueilleurPerDay[b][6]||0) - (perCueilleurPerDay[a][6]||0);
-  });
+  }
+
+  var linkedNums = allNums.filter(function(n){ return !!numToWorker[n]; }).sort(sortFn);
+  var unlinkedNums = allNums.filter(function(n){ return !numToWorker[n]; }).sort(sortFn);
+  var nums = linkedNums.concat(unlinkedNums); // pour l'export uniquement
 
   var html = '<button class="btn btn-ghost" id="btnBackRythme">‹ Retour au menu</button>';
-  html += '<div class="card stack" style="margin-top:14px;">' +
+
+  html += '<div class="kpi-card" style="margin-top:14px;">' +
+    '<div class="kpi-val">'+(rendementPied!==null?rendementPied+' kg':'—')+'</div>' +
+    '<div class="kpi-lbl">Rendement au pied général (kg total ÷ '+totalPlants+' plants)</div>' +
+  '</div>';
+
+  html += '<div class="card stack">' +
     '<div><label>Date</label><input type="date" id="rythmeDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
-    '<div><label>Classement décroissant par</label><select id="rythmeSortPick">' +
+    '<div><label>Classer par</label><select id="rythmeSortPick">' +
       '<option value="kg"'+(sortBy==='kg'?' selected':'')+'>Kg du jour</option>' +
       '<option value="kgh"'+(sortBy==='kgh'?' selected':'')+'>Kg/h (rendement)</option>' +
     '</select></div>' +
   '</div>';
-  html += '<p class="muted" style="margin:0 0 10px;">Numéros visibles ici uniquement — jamais côté trieur ni côté salarié. Le kg/h se calcule uniquement pour les cueilleurs reliés à un compte, à partir de leurs heures pointées ce jour-là.</p>';
+  html += '<p class="muted" style="margin:0 0 14px;font-size:12px;">Numéros visibles ici uniquement — jamais côté trieur ni côté salarié.</p>';
 
-  if(!nums.length){
+  function renderTrend(dayVals){
+    var maxKg = Math.max.apply(null, dayVals.concat([0.1]));
+    return '<div class="trend-bars">' + dayVals.map(function(kg, i){
+      var h = Math.max(3, Math.round((kg/maxKg)*32));
+      return '<div class="trend-bar'+(i===6?' today':'')+'" style="height:'+h+'px;" title="'+joursLabels[i]+' : '+kg+' kg"></div>';
+    }).join('') + '</div>';
+  }
+
+  if(!linkedNums.length && !unlinkedNums.length){
     html += '<p class="muted">Aucune saisie de tri sur les 7 derniers jours.</p>';
   } else {
-    var maxKg = Math.max.apply(null, nums.map(function(n){ return Math.max.apply(null, perCueilleurPerDay[n]); }).concat([0.1]));
-    html += '<div class="card">';
-    nums.forEach(function(n, rank){
-      var w = numToWorker[n];
-      var label = w ? w.prenom : ('N°'+n+' (compte non lié)');
-      var todayKg = round2(perCueilleurPerDay[n][6]||0);
-      var kgH = kgHByNum[n];
-      var bars = perCueilleurPerDay[n].map(function(kg){
-        var h = Math.max(2, Math.round((kg/maxKg)*28));
-        return '<div style="width:9px;height:'+h+'px;background:var(--gold);border-radius:2px;display:inline-block;margin-right:2px;vertical-align:bottom;"></div>';
-      }).join('');
-      html += '<div class="worker-row" style="align-items:center;">' +
-        '<span class="worker-name">'+(rank+1)+'. '+label+'<br><span class="muted" style="font-weight:400;font-size:11px;">tendance 7 jours</span></span>' +
-        '<span style="text-align:right;">' +
-          '<div style="height:30px;">'+bars+'</div>' +
-          '<span class="muted" style="font-size:12px;">'+todayKg+' kg — '+(kgH!==null?kgH+' kg/h':'kg/h non calculable')+'</span>' +
-        '</span>' +
-      '</div>';
-    });
-    html += '</div>';
+    if(linkedNums.length){
+      html += '<div class="section-title" style="margin-top:0;">Classement</div><div class="card">';
+      linkedNums.forEach(function(n, rank){
+        var w = numToWorker[n];
+        var todayKg = round2(perCueilleurPerDay[n][6]||0);
+        var kgH = kgHByNum[n];
+        var badgeClass = rank===0?'gold':(rank===1?'silver':(rank===2?'bronze':''));
+        html += '<div class="rank-card">' +
+          '<div class="rank-badge '+badgeClass+'">'+(rank+1)+'</div>' +
+          '<div class="rank-info">' +
+            '<div class="rank-name">'+w.prenom+'</div>' +
+            '<div class="rank-stats">' +
+              '<div><span class="rank-stat-val">'+todayKg+'</span> <span class="rank-stat-lbl">kg</span></div>' +
+              '<div><span class="rank-stat-val">'+(kgH!==null?kgH:'—')+'</span> <span class="rank-stat-lbl">kg/h</span></div>' +
+            '</div>' +
+          '</div>' +
+          renderTrend(perCueilleurPerDay[n]) +
+        '</div>';
+      });
+      html += '</div>';
+    }
+    if(unlinkedNums.length){
+      html += '<div class="section-title">Numéros non reliés à un compte</div><div class="card">';
+      unlinkedNums.forEach(function(n){
+        var todayKg = round2(perCueilleurPerDay[n][6]||0);
+        html += '<div class="rank-card">' +
+          '<div class="rank-badge">N°'+n+'</div>' +
+          '<div class="rank-info"><div class="rank-name">Non identifié</div><div class="muted" style="font-size:12px;">'+todayKg+' kg ce jour</div></div>' +
+          renderTrend(perCueilleurPerDay[n]) +
+        '</div>';
+      });
+      html += '</div>';
+    }
     html += '<button class="btn btn-gold" id="btnExportRythme">Exporter en Excel</button>';
   }
 
@@ -2336,13 +2398,19 @@ async function renderAdminRythme(){
   if(exportBtn) exportBtn.onclick = function(){
     var wb = XLSX.utils.book_new();
     var rows = [['Rang','Cueilleur','N°','Kg du jour','Kg/h', dateList[0]+' (kg)', dateList[1]+' (kg)', dateList[2]+' (kg)', dateList[3]+' (kg)', dateList[4]+' (kg)', dateList[5]+' (kg)', dateList[6]+' (kg)']];
-    nums.forEach(function(n, rank){
+    linkedNums.forEach(function(n, rank){
       var w = numToWorker[n];
-      var label = w ? w.prenom : 'Non lié';
-      var row = [rank+1, label, n, round2(perCueilleurPerDay[n][6]||0), kgHByNum[n]!==null?kgHByNum[n]:''];
+      var row = [rank+1, w.prenom, n, round2(perCueilleurPerDay[n][6]||0), kgHByNum[n]!==null?kgHByNum[n]:''];
       perCueilleurPerDay[n].forEach(function(kg){ row.push(kg); });
       rows.push(row);
     });
+    unlinkedNums.forEach(function(n){
+      var row = ['', 'Non identifié', n, round2(perCueilleurPerDay[n][6]||0), ''];
+      perCueilleurPerDay[n].forEach(function(kg){ row.push(kg); });
+      rows.push(row);
+    });
+    rows.push([]);
+    rows.push(['Rendement au pied général', '', '', totalKgToday+' kg / '+totalPlants+' plants', rendementPied!==null?rendementPied+' kg/plant':'']);
     var ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Rythme cueillette');
     XLSX.writeFile(wb, 'Rythme_cueillette_'+date+'.xlsx');
