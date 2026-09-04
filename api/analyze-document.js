@@ -48,7 +48,7 @@ Réponds UNIQUEMENT avec un tableau JSON strict, rien d'autre : pas de texte ava
 
 Règles :
 - "date" au format AAAA-MM-JJ. Si une seule date apparaît pour tout le document, applique-la à toutes les lignes.
-- "note" est le code de catégorie/qualité tel qu'écrit sur le document (ex: E, A, B, C, IQF, "HS A", "HS B", "HS C", "HS E", "Vente directe"). Le préfixe "HS" (Hors Standard) fait partie du code s'il est présent — ne l'ignore pas, il distingue une catégorie différente de la lettre seule. Si le document n'a pas de catégorie de ce type, mets une chaîne vide "".
+- "note" est le code de catégorie/qualité tel qu'écrit sur le document (ex: E, A, B, C, IQF, "HS A", "HS B", "HS C", "HS E", "Vente directe"). Chaque ligne de produit a presque toujours ce code, souvent en fin de désignation (après un tiret) ou dans une colonne dédiée — cherche-le attentivement avant de conclure qu'il est absent. Ne mets une chaîne vide "" que si tu es certain qu'aucun code de ce type n'apparaît nulle part pour cette ligne.
 - "variete" est le nom de la variété si elle est indiquée séparément de la catégorie ; sinon laisse une chaîne vide "".
 - "kg" et "prixKg" sont des nombres (utilise un point comme séparateur décimal, pas de virgule).
 - Si le document indique un montant total au lieu d'un prix au kg, calcule prixKg = montant / kg.
