@@ -1991,14 +1991,6 @@ async function renderAdminVentes(){
   var totalKg = round2(bons.reduce(function(s,b){ return s + (parseFloat(b.kg)||0); }, 0));
   var totalMontant = round2(bons.reduce(function(s,b){ return s + (parseFloat(b.montant)||0); }, 0));
 
-  var byVariete = {};
-  bons.forEach(function(b){
-    var v = b.variete || '—';
-    if(!byVariete[v]) byVariete[v] = { kg:0, montant:0 };
-    byVariete[v].kg = round2(byVariete[v].kg + (parseFloat(b.kg)||0));
-    byVariete[v].montant = round2(byVariete[v].montant + (parseFloat(b.montant)||0));
-  });
-
   var byNote = {};
   bons.forEach(function(b){
     var n = (b.note||'').trim().toUpperCase();
@@ -2033,23 +2025,25 @@ async function renderAdminVentes(){
     '<div class="worker-row"><span class="worker-name">Prix moyen général</span><span class="worker-hours">'+(totalKg?round2(totalMontant/totalKg):0)+' €/kg</span></div>' +
   '</div>';
 
-  var varieteKeys = Object.keys(byVariete);
-  if(varieteKeys.length){
-    html += '<div class="section-title">Par variété / catégorie</div><div class="card">';
-    varieteKeys.forEach(function(v){
-      var prixMoyen = byVariete[v].kg ? round2(byVariete[v].montant / byVariete[v].kg) : 0;
-      html += '<div class="worker-row"><span class="worker-name">'+v+'<br><span class="muted" style="font-weight:400;font-size:12px;">prix moyen '+prixMoyen+' €/kg</span></span><span class="worker-hours">'+byVariete[v].kg+' kg — '+byVariete[v].montant+' €</span></div>';
-    });
-    html += '</div>';
-  }
-
   var bonDatesSet = {};
-  bons.forEach(function(b){ if(b.date) bonDatesSet[b.date] = true; });
+  var bonDatesList = [];
+  bons.forEach(function(b){
+    if(!b.date) return;
+    var d = String(b.date).trim().slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+    bonDatesSet[d] = true;
+    bonDatesList.push(d);
+  });
+  bonDatesList.sort();
 
-  var calMonth = state.venteCalMonth || todayISO().slice(0,7);
+  var defaultMonth = bonDatesList.length ? bonDatesList[bonDatesList.length-1].slice(0,7) : todayISO().slice(0,7);
+  var calMonth = state.venteCalMonth || defaultMonth;
   html += '<div class="section-title">Suivi des dates de livraison</div>';
   html += '<div class="card">';
   html += '<div style="margin-bottom:10px;"><input type="month" id="venteCalMonthPick" value="'+calMonth+'"></div>';
+  if(!bonDatesList.length){
+    html += '<p class="muted">Aucun bon d\'apport importé pour l\'instant.</p></div>';
+  } else {
 
   var ymParts = calMonth.split('-');
   var year = parseInt(ymParts[0],10), month = parseInt(ymParts[1],10);
@@ -2068,6 +2062,7 @@ async function renderAdminVentes(){
   html += '</div>';
   html += '<p class="muted" style="margin-top:10px;font-size:12px;">En vert : jour avec au moins un bon d\'apport enregistré.</p>';
   html += '</div>';
+  } // fin du else (bonDatesList.length)
 
   if(noteKeys.length){
     html += '<div class="section-title">Par note</div>';
