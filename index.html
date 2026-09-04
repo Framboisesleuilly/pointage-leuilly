@@ -235,7 +235,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -290,11 +290,13 @@ function render(){
   if(state.screen==='adminSecteurs') return renderAdminSecteurs();
   if(state.screen==='adminParcelleCalendar') return renderAdminParcelleCalendar();
   if(state.screen==='adminVentes') return renderAdminVentes();
+  if(state.screen==='adminAgroVue') return renderAdminAgroVue();
   if(state.screen==='adminDash') return renderAdminDash();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
   if(state.screen==='adminBulkImport') return renderAdminBulkImport();
   if(state.screen==='adminPayroll') return renderAdminPayroll();
   if(state.screen==='adminBarquettes') return renderAdminBarquettes();
+  if(state.screen==='adminRythme') return renderAdminRythme();
   if(state.screen==='adminNewWorker') return renderAdminNewWorker();
   if(state.screen==='adminImportHours') return renderAdminImportHours();
 }
@@ -770,6 +772,7 @@ function renderAdminMenu(){
     '<button class="home-btn" id="mnuBulkDocs"><div class="t">Importer des documents en masse</div><div class="s">Feuilles de paie et autres fichiers</div></button>' +
     '<button class="home-btn" id="mnuPayroll"><div class="t">Récap virements &amp; cotisations</div><div class="s">Montants extraits des bulletins importés</div></button>' +
     '<button class="home-btn" id="mnuBarquettes"><div class="t">Suivi barquettes (tri)</div><div class="s">Par cueilleur, par trieur, export</div></button>' +
+    '<button class="home-btn" id="mnuRythme"><div class="t">Rythme de cueillette</div><div class="s">Visuel quotidien par cueilleur, discret</div></button>' +
     '<button class="home-btn" id="mnuSendReport"><div class="t">Envoyer le récap quotidien</div><div class="s">Immédiatement, avec sauvegarde jointe</div></button>' +
     '<button class="home-btn" id="mnuAgro"><div class="t">Agronomie</div><div class="s">Parcelles, secteurs, variétés, ventes</div></button>' +
     '<div id="mnuSendResult" class="muted" style="text-align:center;"></div>';
@@ -780,6 +783,7 @@ function renderAdminMenu(){
   document.getElementById('mnuBulkDocs').onclick = function(){ state.screen='adminBulkImport'; render(); };
   document.getElementById('mnuPayroll').onclick = function(){ state.screen='adminPayroll'; render(); };
   document.getElementById('mnuBarquettes').onclick = function(){ state.screen='adminBarquettes'; render(); };
+  document.getElementById('mnuRythme').onclick = function(){ state.screen='adminRythme'; render(); };
   document.getElementById('mnuAgro').onclick = function(){ state.screen='adminAgroMenu'; render(); };
   document.getElementById('mnuSendReport').onclick = async function(){
     var resultEl = document.getElementById('mnuSendResult');
@@ -929,9 +933,12 @@ async function renderAdminWorkerDetail(){
   var lockedMonth = validations[editDate.slice(0,7)] || null;
 
   var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';
-  html += '<div class="card" style="display:flex;align-items:center;justify-content:space-between;">' +
-    '<span class="worker-name">Fait aussi du tri</span>' +
-    '<input type="checkbox" id="isTrieurCheck" style="width:22px;height:22px;"'+(w.isTrieur?' checked':'')+'>' +
+  html += '<div class="card stack">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+      '<span class="worker-name">Fait aussi du tri</span>' +
+      '<input type="checkbox" id="isTrieurCheck" style="width:22px;height:22px;"'+(w.isTrieur?' checked':'')+'>' +
+    '</div>' +
+    '<div><label>N° cueilleur (1-56, visible uniquement ici)</label><input type="number" min="1" max="56" id="numCueilleurInput" value="'+(w.numeroCueilleur||'')+'"></div>' +
   '</div>';
   if(lockedMonth){
     html += '<div class="banner">Attention : ce mois a été validé et signé par '+lockedMonth.prenom+' le '+new Date(lockedMonth.validatedAt).toLocaleDateString('fr-FR')+'. Toute correction restera tracée dans l\'historique.</div>';
@@ -1033,6 +1040,11 @@ async function renderAdminWorkerDetail(){
 
   document.getElementById('isTrieurCheck').addEventListener('change', async function(){
     w.isTrieur = this.checked;
+    await saveWorkers(workers);
+  });
+  document.getElementById('numCueilleurInput').addEventListener('change', async function(){
+    var v = parseInt(this.value, 10);
+    w.numeroCueilleur = (v>=1 && v<=56) ? v : null;
     await saveWorkers(workers);
   });
 
@@ -1364,6 +1376,17 @@ async function renderAdminBarquettes(){
 
   html += '<button class="btn btn-gold" id="btnExportBarq">Exporter en Excel</button>';
 
+  html += '<div class="section-title">Réparer l\'historique (une fois)</div>' +
+    '<div class="card stack">' +
+      '<p class="muted">Si des saisies de tri anciennes n\'apparaissent pas dans la sauvegarde automatique, répare l\'index sur une période — sans risque, ça ne modifie aucune donnée, juste l\'index de recherche par date.</p>' +
+      '<div class="grid2">' +
+        '<div><label>Du</label><input type="date" id="repairFrom"></div>' +
+        '<div><label>Au</label><input type="date" id="repairTo" value="'+todayISO()+'"></div>' +
+      '</div>' +
+      '<button class="btn btn-ghost" id="btnRepairIndex">Réparer</button>' +
+      '<div id="repairResult" class="muted"></div>' +
+    '</div>';
+
   app.innerHTML = html;
 
   document.getElementById('btnBackBarq').onclick = function(){ state.screen='adminMenu'; render(); };
@@ -1405,14 +1428,14 @@ async function renderAdminBarquettes(){
     try{
       file = await ensureCompatibleImage(file);
       var base64 = await fileToBase64(file);
-      var r = await fetch('/api/analyze-tri-sheet', {
+      var r = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg' })
+        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg', mode: 'tri' })
       });
       var data = await r.json();
       if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error||'inconnue'); return; }
-      var lignes = data.lignes || [];
+      var lignes = data.resultats || [];
       if(!lignes.length){ resultEl.textContent = 'Aucune ligne détectée sur la photo.'; return; }
       resultEl.textContent = lignes.length + ' ligne(s) détectée(s) — vérifie ci-dessous avant de confirmer.';
       renderTriPhotoReview(lignes, name, date);
@@ -1483,6 +1506,32 @@ async function renderAdminBarquettes(){
     XLSX.utils.book_append_sheet(wb, wsDetail, 'Détail');
 
     XLSX.writeFile(wb, 'Barquettes_'+date+'.xlsx');
+  };
+
+  document.getElementById('btnRepairIndex').onclick = async function(){
+    var from = document.getElementById('repairFrom').value;
+    var to = document.getElementById('repairTo').value;
+    var resultEl = document.getElementById('repairResult');
+    if(!from || !to){ alert('Choisis les deux dates.'); return; }
+    if(from > to){ alert('La date de début doit précéder la date de fin.'); return; }
+    var start = new Date(from+'T00:00:00');
+    var end = new Date(to+'T00:00:00');
+    var maxDays = 400;
+    var dayCount = Math.round((end-start)/86400000)+1;
+    if(dayCount > maxDays){ alert('Période trop longue (max '+maxDays+' jours), réduis-la.'); return; }
+
+    var repaired = 0, checked = 0;
+    for(var d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
+      var dStr = d.toISOString().slice(0,10);
+      checked++;
+      resultEl.textContent = 'Vérification… ('+checked+'/'+dayCount+') — '+repaired+' jour(s) réparé(s)';
+      var dayList = await getBarquettes(dStr);
+      if(dayList.length){
+        await saveBarquettes(dStr, dayList); // redéclenche l'ajout à l'index dans barquettes.js
+        repaired++;
+      }
+    }
+    resultEl.textContent = 'Terminé — '+repaired+' jour(s) avec des données retrouvé(s) et réindexé(s) sur '+checked+' jour(s) vérifié(s).';
   };
 }
 
@@ -1565,14 +1614,14 @@ async function renderAdminImportHours(){
     try{
       file = await ensureCompatibleImage(file);
       var base64 = await fileToBase64(file);
-      var r = await fetch('/api/analyze-timesheet', {
+      var r = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg' })
+        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg', mode: 'timesheet' })
       });
       var data = await r.json();
       if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error||'inconnue'); return; }
-      var jours = data.jours || [];
+      var jours = data.resultats || [];
       if(!jours.length){ resultEl.textContent = 'Aucun jour détecté sur la photo.'; return; }
       resultEl.textContent = jours.length + ' jour(s) détecté(s) — vérifie ci-dessous avant de confirmer.';
       renderPhotoReview(jours, workerId, monthVal);
@@ -1754,12 +1803,14 @@ function renderAdminAgroMenu(){
     '<button class="home-btn" id="agroSecteurs"><div class="t">Secteurs, variétés & pots</div><div class="s">10 secteurs — variété, nombre de pots, latéraux</div></button>' +
     '<button class="home-btn" id="agroCalendar"><div class="t">Calendrier parcelle</div><div class="s">Irrigation, drainage, EC, pH par secteur et par jour</div></button>' +
     '<button class="home-btn" id="agroVentes"><div class="t">Ventes (bons d\'apport)</div><div class="s">Import hebdomadaire, kg et prix, statistiques</div></button>' +
+    '<button class="home-btn" id="agroVue"><div class="t">Vue par variété / secteur</div><div class="s">EC, pH, irrigation — groupables et comparables</div></button>' +
     '</div>';
 
   document.getElementById('btnBackAgro').onclick = function(){ state.screen='adminMenu'; render(); };
   document.getElementById('agroSecteurs').onclick = function(){ state.screen='adminSecteurs'; render(); };
   document.getElementById('agroCalendar').onclick = function(){ state.screen='adminParcelleCalendar'; render(); };
   document.getElementById('agroVentes').onclick = function(){ state.screen='adminVentes'; render(); };
+  document.getElementById('agroVue').onclick = function(){ state.screen='adminAgroVue'; render(); };
 }
 
 async function renderAdminSecteurs(){
@@ -1768,20 +1819,44 @@ async function renderAdminSecteurs(){
   var secteurs = await getSecteurs();
   if(!secteurs.length){
     secteurs = [];
-    for(var i=1;i<=10;i++){ secteurs.push({ num:i, variete:'', pots:0, lateraux:0 }); }
+    for(var i=1;i<=10;i++){ secteurs.push({ num:i, variete:'', datePlantation:'', potsParLigne:0, nombreLignes:0, lateralesParPlant:0, fruitsParLaterale:0, poidsMoyenFruit:0 }); }
+  } else {
+    // Migration douce depuis l'ancien format (pots/lateraux uniques)
+    secteurs.forEach(function(s){
+      if(s.potsParLigne===undefined){ s.potsParLigne = s.pots||0; s.nombreLignes = s.pots?1:0; }
+      if(s.lateralesParPlant===undefined){ s.lateralesParPlant = s.lateraux||0; }
+      if(s.datePlantation===undefined) s.datePlantation = '';
+      if(s.fruitsParLaterale===undefined) s.fruitsParLaterale = 0;
+      if(s.poidsMoyenFruit===undefined) s.poidsMoyenFruit = 0;
+    });
   }
   secteurs.sort(function(a,b){ return a.num-b.num; });
 
+  function calcPlants(s){ return (parseFloat(s.potsParLigne)||0) * (parseFloat(s.nombreLignes)||0); }
+  function calcRendement(s){
+    var plants = calcPlants(s);
+    var kg = plants * (parseFloat(s.lateralesParPlant)||0) * (parseFloat(s.fruitsParLaterale)||0) * (parseFloat(s.poidsMoyenFruit)||0) / 1000;
+    return round2(kg);
+  }
+
   var html = '<button class="btn btn-ghost" id="btnBackSecteurs">‹ Retour à l\'agronomie</button>';
-  html += '<p class="muted" style="margin:10px 0;">Renseigne la variété, le nombre de pots et le nombre de latéraux pour chacun de tes 10 secteurs.</p>';
+  html += '<p class="muted" style="margin:10px 0;">Renseigne les informations de chaque secteur — le nombre de plants et le rendement prévisionnel se calculent automatiquement.</p>';
   secteurs.forEach(function(s, idx){
     html += '<div class="card stack">' +
       '<div class="worker-name">Secteur '+s.num+'</div>' +
       '<div><label>Variété</label><input type="text" data-idx="'+idx+'" data-f="variete" value="'+(s.variete||'')+'" placeholder="Ex: Kwanza"></div>' +
+      '<div><label>Date de plantation</label><input type="date" data-idx="'+idx+'" data-f="datePlantation" value="'+(s.datePlantation||'')+'"></div>' +
       '<div class="grid2">' +
-        '<div><label>Nombre de pots</label><input type="number" min="0" data-idx="'+idx+'" data-f="pots" value="'+(s.pots||0)+'"></div>' +
-        '<div><label>Nombre de latéraux</label><input type="number" min="0" data-idx="'+idx+'" data-f="lateraux" value="'+(s.lateraux||0)+'"></div>' +
+        '<div><label>Pots par ligne</label><input type="number" min="0" data-idx="'+idx+'" data-f="potsParLigne" data-calc="'+idx+'" value="'+(s.potsParLigne||0)+'"></div>' +
+        '<div><label>Nombre de lignes</label><input type="number" min="0" data-idx="'+idx+'" data-f="nombreLignes" data-calc="'+idx+'" value="'+(s.nombreLignes||0)+'"></div>' +
       '</div>' +
+      '<div class="total-line" style="border-top:none;padding-top:0;"><span>Nombre de plants</span><span class="val" id="plants-'+idx+'" style="font-size:18px;">'+calcPlants(s)+'</span></div>' +
+      '<div class="grid2">' +
+        '<div><label>Latérales / plant</label><input type="number" min="0" data-idx="'+idx+'" data-f="lateralesParPlant" data-calc="'+idx+'" value="'+(s.lateralesParPlant||0)+'"></div>' +
+        '<div><label>Fruits / latérale</label><input type="number" min="0" data-idx="'+idx+'" data-f="fruitsParLaterale" data-calc="'+idx+'" value="'+(s.fruitsParLaterale||0)+'"></div>' +
+      '</div>' +
+      '<div><label>Poids moyen d\'un fruit (g)</label><input type="number" min="0" step="0.1" data-idx="'+idx+'" data-f="poidsMoyenFruit" data-calc="'+idx+'" value="'+(s.poidsMoyenFruit||0)+'"></div>' +
+      '<div class="total-line"><span>Rendement prévisionnel</span><span class="val" id="rendement-'+idx+'">'+calcRendement(s)+' kg</span></div>' +
     '</div>';
   });
   html += '<button class="btn btn-gold" id="btnSaveSecteurs">Enregistrer les 10 secteurs</button><div id="secteursResult" class="muted" style="text-align:center;"></div>';
@@ -1789,11 +1864,25 @@ async function renderAdminSecteurs(){
   app.innerHTML = html;
 
   document.getElementById('btnBackSecteurs').onclick = function(){ state.screen='adminAgroMenu'; render(); };
+
+  document.querySelectorAll('input[data-calc]').forEach(function(inp){
+    inp.addEventListener('input', function(){
+      var idx = parseInt(this.getAttribute('data-idx'),10);
+      var s = secteurs[idx];
+      document.querySelectorAll('input[data-idx="'+idx+'"]').forEach(function(i2){
+        var f = i2.getAttribute('data-f');
+        if(f && f!=='variete' && f!=='datePlantation') s[f] = parseFloat(i2.value)||0;
+      });
+      document.getElementById('plants-'+idx).textContent = calcPlants(s);
+      document.getElementById('rendement-'+idx).textContent = calcRendement(s) + ' kg';
+    });
+  });
+
   document.getElementById('btnSaveSecteurs').onclick = async function(){
     document.querySelectorAll('input[data-idx]').forEach(function(inp){
       var idx = parseInt(inp.getAttribute('data-idx'),10);
       var f = inp.getAttribute('data-f');
-      secteurs[idx][f] = (f==='variete') ? inp.value : (parseInt(inp.value,10)||0);
+      secteurs[idx][f] = (f==='variete' || f==='datePlantation') ? inp.value : (parseFloat(inp.value)||0);
     });
     var ok = await saveSecteurs(secteurs);
     document.getElementById('secteursResult').textContent = ok ? 'Enregistré ✓' : 'Erreur lors de l\'enregistrement.';
@@ -1891,13 +1980,22 @@ async function renderAdminVentes(){
   });
 
   var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour à l\'agronomie</button>';
-  html += '<div class="section-title" style="margin-top:14px;">Importer un bon d\'apport (hebdomadaire)</div>';
+  html += '<div class="section-title" style="margin-top:14px;">Importer un bon d\'apport — Excel</div>';
   html += '<div class="card stack">' +
     '<p class="muted">Fichier Excel avec une ligne d\'en-tête puis, par ligne : Date, Variété, Kg, Prix €/kg.</p>' +
     '<div><label>Fichier Excel</label><input type="file" id="venteFile" accept=".xlsx,.xls"></div>' +
     '<button class="btn btn-gold" id="btnImportVentes">Importer</button>' +
     '<div id="venteResult" class="muted"></div>' +
   '</div>';
+
+  html += '<div class="section-title">Importer un bon d\'apport — PDF ou photo</div>';
+  html += '<div class="card stack">' +
+    '<p class="muted">Dépose directement le bon d\'apport reçu (PDF ou photo). L\'IA lit les lignes, à vérifier avant import.</p>' +
+    '<div><label>Fichier</label><input type="file" id="ventePdfFile" accept="image/*,.pdf,application/pdf"></div>' +
+    '<button class="btn btn-gold" id="btnAnalyzeVentePdf">Analyser</button>' +
+    '<div id="ventePdfResult" class="muted"></div>' +
+  '</div>' +
+  '<div id="ventePdfReview"></div>';
 
   html += '<div class="card">' +
     '<div class="worker-row"><span class="worker-name">Total kg vendus</span><span class="worker-hours">'+totalKg+' kg</span></div>' +
@@ -1920,6 +2018,73 @@ async function renderAdminVentes(){
   app.innerHTML = html;
 
   document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminAgroMenu'; render(); };
+
+  document.getElementById('btnAnalyzeVentePdf').onclick = async function(){
+    var file = document.getElementById('ventePdfFile').files[0];
+    var resultEl = document.getElementById('ventePdfResult');
+    if(!file){ alert('Choisis un fichier.'); return; }
+    resultEl.textContent = 'Analyse en cours… (peut prendre 10-20 secondes)';
+    document.getElementById('ventePdfReview').innerHTML = '';
+    try{
+      file = await ensureCompatibleImage(file);
+      var base64 = await fileToBase64(file);
+      var r = await fetch('/api/analyze-document', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'application/pdf', mode: 'bonApport' })
+      });
+      var data = await r.json();
+      if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error||'inconnue'); return; }
+      var lignes = data.resultats || [];
+      if(!lignes.length){ resultEl.textContent = 'Aucune ligne détectée.'; return; }
+      resultEl.textContent = lignes.length + ' ligne(s) détectée(s) — vérifie avant de confirmer.';
+      renderVentePdfReview(lignes);
+    }catch(err){
+      resultEl.textContent = 'Erreur : ' + err.message;
+    }
+  };
+
+  function renderVentePdfReview(lignes){
+    var html2 = '<div class="section-title">Vérification avant import</div><div class="card">';
+    lignes.forEach(function(l, idx){
+      html2 += '<div style="padding:10px 0;border-bottom:1px solid var(--line);">' +
+        '<div class="grid2">' +
+          '<input type="date" data-f="date" data-idx="'+idx+'" value="'+(l.date||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+          '<input type="text" data-f="variete" data-idx="'+idx+'" value="'+(l.variete||'')+'" placeholder="Variété" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+        '</div>' +
+        '<div class="grid2" style="margin-top:6px;">' +
+          '<input type="number" step="0.01" data-f="kg" data-idx="'+idx+'" value="'+(l.kg||'')+'" placeholder="Kg" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+          '<input type="number" step="0.01" data-f="prixKg" data-idx="'+idx+'" value="'+(l.prixKg||'')+'" placeholder="Prix €/kg" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+        '</div>' +
+      '</div>';
+    });
+    html2 += '</div><button class="btn btn-gold" id="btnConfirmVenteImport">Confirmer et importer ces '+lignes.length+' ligne(s)</button><div id="venteConfirmResult" class="muted"></div>';
+    document.getElementById('ventePdfReview').innerHTML = html2;
+
+    document.querySelectorAll('#ventePdfReview input[data-f]').forEach(function(inp){
+      inp.addEventListener('change', function(){
+        var idx = parseInt(this.getAttribute('data-idx'),10);
+        var f = this.getAttribute('data-f');
+        lignes[idx][f] = this.value;
+      });
+    });
+
+    document.getElementById('btnConfirmVenteImport').onclick = async function(){
+      var current = await getBonsApport();
+      var count = 0;
+      lignes.forEach(function(l){
+        var kg = parseFloat(l.kg)||0;
+        var prix = parseFloat(l.prixKg)||0;
+        if(!kg) return;
+        current.push({ date: l.date, variete: l.variete||'', kg: kg, prixKg: prix, montant: round2(kg*prix), importeLe: new Date().toISOString(), importeDePdf: true });
+        count++;
+      });
+      var ok = await saveBonsApport(current);
+      var confirmEl = document.getElementById('venteConfirmResult');
+      confirmEl.textContent = ok ? (count + ' ligne(s) importée(s) avec succès.') : 'Erreur lors de l\'enregistrement.';
+      if(ok) renderAdminVentes();
+    };
+  }
 
   document.getElementById('btnImportVentes').onclick = async function(){
     var file = document.getElementById('venteFile').files[0];
@@ -1970,6 +2135,165 @@ async function renderAdminVentes(){
     XLSX.utils.book_append_sheet(wb, ws, 'Ventes');
     XLSX.writeFile(wb, 'Ventes_'+todayISO()+'.xlsx');
   };
+}
+
+async function renderAdminAgroVue(){
+  headerTitle.textContent = 'Vue agronomique';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var groupBy = state.agroVueGroupBy || 'secteur';
+  var days = state.agroVueDays || 30;
+
+  var secteurs = await getSecteurs();
+  var secteurMap = {};
+  secteurs.forEach(function(s){ secteurMap[s.num] = s; });
+
+  var today = new Date(todayISO()+'T00:00:00');
+  var fromDate = new Date(today);
+  fromDate.setDate(fromDate.getDate() - days + 1);
+
+  var entries = [];
+  var cursor = new Date(fromDate);
+  var dateList = [];
+  while(cursor <= today){
+    dateList.push(cursor.toISOString().slice(0,10));
+    cursor.setDate(cursor.getDate()+1);
+  }
+  var logsPerDate = await Promise.all(dateList.map(function(d){ return getParcelleLog(d); }));
+  logsPerDate.forEach(function(list, i){
+    list.forEach(function(l){ entries.push(Object.assign({}, l, { date: dateList[i] })); });
+  });
+
+  var groups = {};
+  entries.forEach(function(e){
+    var key = (groupBy==='secteur') ? ('Secteur '+e.secteur) : ((secteurMap[e.secteur]&&secteurMap[e.secteur].variete)||'Variété non renseignée (secteur '+e.secteur+')');
+    if(!groups[key]) groups[key] = { ecs:[], phs:[], irrigations:[], count:0 };
+    if(e.ec!==null && e.ec!==undefined) groups[key].ecs.push(e.ec);
+    if(e.ph!==null && e.ph!==undefined) groups[key].phs.push(e.ph);
+    if(e.irrigation!==null && e.irrigation!==undefined) groups[key].irrigations.push(e.irrigation);
+    groups[key].count++;
+  });
+
+  function avg(arr){ return arr.length ? round2(arr.reduce(function(a,b){return a+b;},0)/arr.length) : null; }
+
+  var groupKeys = Object.keys(groups).sort();
+  var maxEc = Math.max.apply(null, groupKeys.map(function(k){ return avg(groups[k].ecs)||0; }).concat([1]));
+  var maxPh = 14;
+
+  var html = '<button class="btn btn-ghost" id="btnBackVue">‹ Retour à l\'agronomie</button>';
+  html += '<div class="card stack" style="margin-top:14px;">' +
+    '<div><label>Grouper par</label><select id="vueGroupBy">' +
+      '<option value="secteur"'+(groupBy==='secteur'?' selected':'')+'>Secteur</option>' +
+      '<option value="variete"'+(groupBy==='variete'?' selected':'')+'>Variété</option>' +
+    '</select></div>' +
+    '<div><label>Période</label><select id="vueDays">' +
+      '<option value="7"'+(days===7?' selected':'')+'>7 derniers jours</option>' +
+      '<option value="30"'+(days===30?' selected':'')+'>30 derniers jours</option>' +
+      '<option value="90"'+(days===90?' selected':'')+'>90 derniers jours</option>' +
+    '</select></div>' +
+  '</div>';
+
+  if(!groupKeys.length){
+    html += '<p class="muted">Aucune donnée de calendrier parcelle sur cette période.</p>';
+  } else {
+    groupKeys.forEach(function(k){
+      var g = groups[k];
+      var ecAvg = avg(g.ecs);
+      var phAvg = avg(g.phs);
+      var irrigTotal = round2(g.irrigations.reduce(function(a,b){return a+b;},0));
+      html += '<div class="card stack">' +
+        '<div class="worker-name">'+k+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+g.count+' saisie(s) sur la période</span></div>';
+      if(ecAvg!==null){
+        html += '<div><label style="margin-bottom:4px;">EC moyen : '+ecAvg+' mS/cm</label>' +
+          '<div style="background:var(--line);border-radius:6px;height:10px;overflow:hidden;"><div style="width:'+Math.min(100, (ecAvg/maxEc)*100)+'%;background:var(--gold);height:100%;"></div></div></div>';
+      }
+      if(phAvg!==null){
+        html += '<div><label style="margin-bottom:4px;">pH moyen : '+phAvg+'</label>' +
+          '<div style="background:var(--line);border-radius:6px;height:10px;overflow:hidden;"><div style="width:'+Math.min(100, (phAvg/maxPh)*100)+'%;background:var(--moss);height:100%;"></div></div></div>';
+      }
+      if(g.irrigations.length){
+        html += '<div class="muted">Irrigation cumulée : '+irrigTotal+'</div>';
+      }
+      if(ecAvg===null && phAvg===null && !g.irrigations.length){
+        html += '<p class="muted">Pas de mesure EC/pH/irrigation sur la période.</p>';
+      }
+      html += '</div>';
+    });
+  }
+
+  app.innerHTML = html;
+
+  document.getElementById('btnBackVue').onclick = function(){ state.screen='adminAgroMenu'; render(); };
+  document.getElementById('vueGroupBy').addEventListener('change', function(){
+    state.agroVueGroupBy = this.value;
+    renderAdminAgroVue();
+  });
+  document.getElementById('vueDays').addEventListener('change', function(){
+    state.agroVueDays = parseInt(this.value,10);
+    renderAdminAgroVue();
+  });
+}
+
+async function renderAdminRythme(){
+  headerTitle.textContent = 'Rythme de cueillette';
+  var date = state.rythmeDate || todayISO();
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var workers = await getWorkers();
+  var numToWorker = {};
+  workers.forEach(function(w){ if(w.numeroCueilleur) numToWorker[w.numeroCueilleur] = w; });
+
+  var dateList = [];
+  var d0 = new Date(date+'T00:00:00');
+  for(var i=6;i>=0;i--){ var dd = new Date(d0); dd.setDate(dd.getDate()-i); dateList.push(dd.toISOString().slice(0,10)); }
+  var listsPerDay = await Promise.all(dateList.map(function(dd){ return getBarquettes(dd); }));
+
+  var perCueilleurPerDay = {};
+  listsPerDay.forEach(function(list, di){
+    list.forEach(function(e){
+      var num = e.cueilleurNum;
+      if(num===0 || num===undefined || num===null) return;
+      if(!perCueilleurPerDay[num]) perCueilleurPerDay[num] = new Array(7).fill(0);
+      perCueilleurPerDay[num][di] = round2(perCueilleurPerDay[num][di] + (parseFloat(e.barquettes)||0)*0.125);
+    });
+  });
+
+  var nums = Object.keys(perCueilleurPerDay).map(Number).sort(function(a,b){
+    return (perCueilleurPerDay[b][6]||0) - (perCueilleurPerDay[a][6]||0);
+  });
+
+  var html = '<button class="btn btn-ghost" id="btnBackRythme">‹ Retour au menu</button>';
+  html += '<div class="card" style="margin-top:14px;"><label>Date</label><input type="date" id="rythmeDatePick" value="'+date+'" max="'+todayISO()+'"></div>';
+  html += '<p class="muted" style="margin:0 0 10px;">Numéros visibles ici uniquement — jamais côté trieur ni côté salarié.</p>';
+
+  if(!nums.length){
+    html += '<p class="muted">Aucune saisie de tri sur les 7 derniers jours.</p>';
+  } else {
+    var maxKg = Math.max.apply(null, nums.map(function(n){ return Math.max.apply(null, perCueilleurPerDay[n]); }).concat([0.1]));
+    html += '<div class="card">';
+    nums.forEach(function(n){
+      var w = numToWorker[n];
+      var label = w ? w.prenom : ('N°'+n+' (compte non lié)');
+      var todayKg = round2(perCueilleurPerDay[n][6]||0);
+      var bars = perCueilleurPerDay[n].map(function(kg){
+        var h = Math.max(2, Math.round((kg/maxKg)*28));
+        return '<div style="width:9px;height:'+h+'px;background:var(--gold);border-radius:2px;display:inline-block;margin-right:2px;vertical-align:bottom;"></div>';
+      }).join('');
+      html += '<div class="worker-row" style="align-items:center;">' +
+        '<span class="worker-name">'+label+'<br><span class="muted" style="font-weight:400;font-size:11px;">tendance 7 jours</span></span>' +
+        '<span style="text-align:right;">' +
+          '<div style="height:30px;">'+bars+'</div>' +
+          '<span class="muted" style="font-size:12px;">'+todayKg+' kg ce jour</span>' +
+        '</span>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
+  app.innerHTML = html;
+  document.getElementById('btnBackRythme').onclick = function(){ state.screen='adminMenu'; render(); };
+  document.getElementById('rythmeDatePick').addEventListener('change', function(){
+    state.rythmeDate = this.value;
+    renderAdminRythme();
+  });
 }
 
 function exportExcel(allData, mods){
@@ -2026,7 +2350,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null }; render(); };
 
 render();
 })();
