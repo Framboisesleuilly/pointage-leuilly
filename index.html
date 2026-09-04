@@ -255,12 +255,18 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all' };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
 function round2(n){ return Math.round(n*100)/100; }
 function normalizeNote(n){ return (n||'').trim().toUpperCase().replace(/^HS\s+/,''); }
+function resolveNote(note, variete){
+  var n = normalizeNote(note);
+  if(n) return n;
+  if(/\bIQF\b/i.test(variete||'')) return 'IQF';
+  return '';
+}
 function normalizeDateStr(d){ return String(d||'').trim().slice(0,10); }
 function cueilleurLabel(n){ return (parseInt(n,10)===0) ? 'Non identifié (sans papier)' : 'Cueilleur n°'+n; }
 function timeToDecimal(t){ if(!t) return null; var parts = t.split(':'); return parseInt(parts[0],10) + parseInt(parts[1],10)/60; }
@@ -788,16 +794,23 @@ function renderAdminLogin(){
 function renderAdminMenu(){
   headerTitle.textContent = 'Espace responsable';
   app.innerHTML =
+    '<div class="section-title" style="margin-top:0;">Personnel & heures</div>' +
     '<button class="home-btn" id="mnuHeures"><div class="t">Heures & export</div><div class="s">Total par salarié, export Excel, suivi des documents</div></button>' +
     '<button class="home-btn" id="mnuNewWorker"><div class="t">Créer un salarié</div><div class="s">Ajouter un compte directement</div></button>' +
     '<button class="home-btn" id="mnuImportHours"><div class="t">Importer une feuille d\'heures</div><div class="s">Depuis un fichier Excel ou une photo</div></button>' +
     '<button class="home-btn" id="mnuBulkDocs"><div class="t">Importer des documents en masse</div><div class="s">Feuilles de paie et autres fichiers</div></button>' +
     '<button class="home-btn" id="mnuPayroll"><div class="t">Récap virements &amp; cotisations</div><div class="s">Montants extraits des bulletins importés</div></button>' +
+
+    '<div class="section-title">Production & tri</div>' +
     '<button class="home-btn" id="mnuBarquettes"><div class="t">Suivi barquettes (tri)</div><div class="s">Par cueilleur, par trieur, export</div></button>' +
     '<button class="home-btn" id="mnuRythme"><div class="t">Rythme de cueillette</div><div class="s">Visuel quotidien par cueilleur, discret</div></button>' +
-    '<button class="home-btn" id="mnuVentes"><div class="t">Ventes (bons d\'apport)</div><div class="s">Import PDF, kg par note, prix, calendrier</div></button>' +
-    '<button class="home-btn" id="mnuSendReport"><div class="t">Envoyer le récap quotidien</div><div class="s">Immédiatement, avec sauvegarde jointe</div></button>' +
+
+    '<div class="section-title">Agronomie & ventes</div>' +
     '<button class="home-btn" id="mnuAgro"><div class="t">Agronomie</div><div class="s">Parcelles, secteurs, variétés</div></button>' +
+    '<button class="home-btn" id="mnuVentes"><div class="t">Ventes (bons d\'apport)</div><div class="s">Import PDF, kg par note, prix, calendrier</div></button>' +
+
+    '<div class="section-title">Système</div>' +
+    '<button class="home-btn" id="mnuSendReport"><div class="t">Envoyer le récap quotidien</div><div class="s">Immédiatement, avec sauvegarde jointe</div></button>' +
     '<div id="mnuSendResult" class="muted" style="text-align:center;"></div>';
 
   document.getElementById('mnuHeures').onclick = function(){ state.screen='adminDash'; render(); };
@@ -1988,18 +2001,41 @@ async function renderAdminParcelleCalendar(){
 async function renderAdminVentes(){
   headerTitle.textContent = 'Ventes';
   app.innerHTML = '<p class="muted">Chargement…</p>';
-  var bons = await getBonsApport();
+  var allBons = await getBonsApport();
+
+  // Comparatif toutes années confondues (jamais filtré)
+  var byYear = {};
+  allBons.forEach(function(b){
+    var y = normalizeDateStr(b.date).slice(0,4);
+    if(!/^\d{4}$/.test(y)) return;
+    if(!byYear[y]) byYear[y] = { kg:0, montant:0 };
+    byYear[y].kg = round2(byYear[y].kg + (parseFloat(b.kg)||0));
+    byYear[y].montant = round2(byYear[y].montant + (parseFloat(b.montant)||0));
+  });
+  var years = Object.keys(byYear).sort();
+
+  var yearFilter = state.venteYearFilter || 'all';
+  var bons = (yearFilter==='all') ? allBons : allBons.filter(function(b){ return normalizeDateStr(b.date).slice(0,4)===yearFilter; });
 
   var totalKg = round2(bons.reduce(function(s,b){ return s + (parseFloat(b.kg)||0); }, 0));
   var totalMontant = round2(bons.reduce(function(s,b){ return s + (parseFloat(b.montant)||0); }, 0));
 
   var byNote = {};
+  var byVariete = {};
   bons.forEach(function(b){
-    var n = normalizeNote(b.note);
-    if(!n) return;
-    if(!byNote[n]) byNote[n] = 0;
-    byNote[n] = round2(byNote[n] + (parseFloat(b.kg)||0));
+    var n = resolveNote(b.note, b.variete);
+    if(n){
+      if(!byNote[n]) byNote[n] = 0;
+      byNote[n] = round2(byNote[n] + (parseFloat(b.kg)||0));
+    }
+    var v = (b.variete||'').trim();
+    if(v){
+      if(!byVariete[v]) byVariete[v] = { kg:0, montant:0 };
+      byVariete[v].kg = round2(byVariete[v].kg + (parseFloat(b.kg)||0));
+      byVariete[v].montant = round2(byVariete[v].montant + (parseFloat(b.montant)||0));
+    }
   });
+  var varieteKeys = Object.keys(byVariete).sort();
   var noteOrder = ['E','A','B','C','IQF'];
   function baseNoteCode(n){ return n.replace(/^HS\s+/i,'').trim(); }
   var noteKeys = Object.keys(byNote).sort(function(a,b){
@@ -2018,9 +2054,27 @@ async function renderAdminVentes(){
 
   var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour au menu</button>';
 
-  html += '<div class="section-title" style="margin-top:14px;">Importer un bon d\'apport — PDF ou photo</div>';
+  if(years.length){
+    html += '<div class="card" style="margin-top:14px;"><label>Année affichée</label><select id="venteYearPick">' +
+      '<option value="all"'+(yearFilter==='all'?' selected':'')+'>Toutes les années</option>' +
+      years.slice().reverse().map(function(y){ return '<option value="'+y+'"'+(yearFilter===y?' selected':'')+'>'+y+'</option>'; }).join('') +
+    '</select></div>';
+  }
+
+  if(years.length > 1){
+    html += '<div class="section-title">Comparatif par année</div>';
+    html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:16px;">' +
+      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Année</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Prix moyen €/kg</th></tr>';
+    years.forEach(function(y){
+      var prixMoyen = byYear[y].kg ? round2(byYear[y].montant/byYear[y].kg) : 0;
+      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">'+y+'</td><td style="text-align:right;padding:10px 14px;">'+byYear[y].kg+'</td><td style="text-align:right;padding:10px 14px;">'+prixMoyen+'</td></tr>';
+    });
+    html += '</table>';
+  }
+
+  html += '<div class="section-title">Importer un bon d\'apport — PDF ou photo</div>';
   html += '<div class="card stack">' +
-    '<p class="muted">Dépose directement le(s) bon(s) d\'apport reçu(s) — plusieurs à la fois si besoin. L\'IA lit et importe automatiquement, regroupé par variété, en évitant les doublons (même date + même variété déjà importée).</p>' +
+    '<p class="muted">Dépose directement le(s) bon(s) d\'apport reçu(s), de n\'importe quelle année — plusieurs à la fois si besoin. L\'IA lit et importe automatiquement, regroupé par note, en évitant les doublons (même date + même note déjà importée).</p>' +
     '<div><label>Fichier(s)</label><input type="file" id="ventePdfFile" accept="image/*,.pdf,application/pdf" multiple></div>' +
     '<button class="btn btn-gold" id="btnAnalyzeVentePdf">Analyser et importer</button>' +
     '<div id="ventePdfResult" class="muted"></div>' +
@@ -2028,7 +2082,7 @@ async function renderAdminVentes(){
   '<div id="ventePdfReview"></div>';
 
   html += '<div class="card">' +
-    '<div class="worker-row"><span class="worker-name">Total kg vendus</span><span class="worker-hours">'+totalKg+' kg</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Total kg vendus'+(yearFilter!=='all'?' ('+yearFilter+')':'')+'</span><span class="worker-hours">'+totalKg+' kg</span></div>' +
     '<div class="worker-row"><span class="worker-name">Total montant</span><span class="worker-hours">'+totalMontant+' €</span></div>' +
     '<div class="worker-row"><span class="worker-name">Prix moyen général</span><span class="worker-hours">'+(totalKg?round2(totalMontant/totalKg):0)+' €/kg</span></div>' +
   '</div>';
@@ -2120,8 +2174,17 @@ async function renderAdminVentes(){
     html += '</table>';
   }
 
+  if(varieteKeys.length){
+    html += '<div class="section-title">Par variété</div><div class="card">';
+    varieteKeys.forEach(function(v){
+      var prixMoyen = byVariete[v].kg ? round2(byVariete[v].montant/byVariete[v].kg) : 0;
+      html += '<div class="worker-row"><span class="worker-name">'+v+'<br><span class="muted" style="font-weight:400;font-size:12px;">prix moyen '+prixMoyen+' €/kg</span></span><span class="worker-hours">'+byVariete[v].kg+' kg</span></div>';
+    });
+    html += '</div>';
+  }
+
   var noNoteIdx = [];
-  bons.forEach(function(b, idx){ if(!normalizeNote(b.note)) noNoteIdx.push(idx); });
+  bons.forEach(function(b, idx){ if(!resolveNote(b.note, b.variete)) noNoteIdx.push(idx); });
   if(noNoteIdx.length){
     html += '<div class="section-title">'+noNoteIdx.length+' ligne(s) sans note détectée — à corriger</div><div class="card">';
     noNoteIdx.forEach(function(idx){
@@ -2151,9 +2214,18 @@ async function renderAdminVentes(){
       var input = document.querySelector('input[data-fixidx="'+idx+'"]');
       var newNote = normalizeNote(input.value);
       if(!newNote){ alert('Renseigne une note.'); return; }
+      var target = bons[idx];
+      if(!target){ alert('Cette ligne n\'existe plus, recharge la page.'); return; }
       var current = await getBonsApport();
-      if(!current[idx]){ alert('Cette ligne n\'existe plus, recharge la page.'); return; }
-      current[idx].note = newNote;
+      var matchIdx = current.findIndex(function(c){
+        return normalizeDateStr(c.date)===normalizeDateStr(target.date) &&
+          (parseFloat(c.kg)||0)===(parseFloat(target.kg)||0) &&
+          (parseFloat(c.montant)||0)===(parseFloat(target.montant)||0) &&
+          (c.variete||'')===(target.variete||'') &&
+          !resolveNote(c.note, c.variete);
+      });
+      if(matchIdx===-1){ alert('Cette ligne n\'a pas pu être retrouvée (elle a peut-être déjà été corrigée), recharge la page.'); return; }
+      current[matchIdx].note = newNote;
       var ok = await saveBonsApport(current);
       if(!ok){ alert('Erreur lors de l\'enregistrement.'); return; }
       renderAdminVentes();
@@ -2167,10 +2239,11 @@ async function renderAdminVentes(){
     var merged = {};
     var order = [];
     all.forEach(function(b){
-      var note = normalizeNote(b.note) || 'SANS NOTE';
+      var note = resolveNote(b.note, b.variete) || 'SANS NOTE';
+      var v = (b.variete||'').trim();
       var d = normalizeDateStr(b.date);
-      var key = d+'|'+note;
-      if(!merged[key]){ merged[key] = { date: d, note: note, variete: b.variete||'', kg: 0, montant: 0, importeLe: new Date().toISOString() }; order.push(key); }
+      var key = d+'|'+note+'|'+v.toUpperCase();
+      if(!merged[key]){ merged[key] = { date: d, note: note, variete: v, kg: 0, montant: 0, importeLe: new Date().toISOString() }; order.push(key); }
       merged[key].kg = round2(merged[key].kg + (parseFloat(b.kg)||0));
       merged[key].montant = round2(merged[key].montant + (parseFloat(b.montant)||0));
     });
@@ -2201,7 +2274,14 @@ async function renderAdminVentes(){
     if(ok) renderAdminVentes();
   };
 
-  document.getElementById('venteCalMonthPick').addEventListener('change', function(){
+  var yearPick = document.getElementById('venteYearPick');
+  if(yearPick) yearPick.addEventListener('change', function(){
+    state.venteYearFilter = this.value;
+    renderAdminVentes();
+  });
+
+  var calMonthPick = document.getElementById('venteCalMonthPick');
+  if(calMonthPick) calMonthPick.addEventListener('change', function(){
     state.venteCalMonth = this.value;
     renderAdminVentes();
   });
@@ -2236,13 +2316,13 @@ async function renderAdminVentes(){
       return;
     }
 
-    // Regroupe par catégorie (note) uniquement : le texte de variété étant très long et variable d'un import à l'autre, il n'est plus fiable pour distinguer les lignes.
+    // Regroupe par note ET variété — la variété est maintenant un nom court et fiable (extrait proprement par l'IA), donc réutilisable comme critère.
     var groups = {};
     var groupOrder = [];
     allLignes.forEach(function(l){
-      var note = normalizeNote(l.note) || 'SANS NOTE';
+      var note = resolveNote(l.note, l.variete) || 'SANS NOTE';
       var v = (l.variete || '').trim();
-      var key = note;
+      var key = note+'||'+v.toUpperCase();
       if(!groups[key]){ groups[key] = { variete: v, note: note, date: l.date||'', kg: 0, montant: 0 }; groupOrder.push(key); }
       var kg = parseFloat(l.kg)||0;
       var prix = parseFloat(l.prixKg)||0;
@@ -2251,18 +2331,18 @@ async function renderAdminVentes(){
       if(l.date && l.date > groups[key].date) groups[key].date = l.date;
     });
 
-    // Détection des doublons : même date + même catégorie déjà présente dans les bons existants (la variété, texte trop variable, n'est plus prise en compte).
+    // Détection des doublons : même date + même catégorie + même variété déjà présente dans les bons existants.
     var current = await getBonsApport();
     var existingKeys = {};
-    current.forEach(function(b){ existingKeys[normalizeDateStr(b.date)+'|'+normalizeNote(b.note)] = true; });
+    current.forEach(function(b){ existingKeys[normalizeDateStr(b.date)+'|'+resolveNote(b.note, b.variete)+'|'+(b.variete||'').trim().toUpperCase()] = true; });
 
     var imported = [], skipped = [];
     groupOrder.forEach(function(key){
       var g = groups[key];
       var kg = g.kg;
       if(!kg) return;
-      var dupKey = normalizeDateStr(g.date)+'|'+g.note;
-      var label = g.note;
+      var dupKey = normalizeDateStr(g.date)+'|'+g.note+'|'+g.variete.toUpperCase();
+      var label = g.note + (g.variete ? ' / '+g.variete : '');
       if(existingKeys[dupKey]){
         skipped.push(label+' ('+g.date+')');
         return;
@@ -2303,6 +2383,16 @@ async function renderAdminVentes(){
       noteRows.push(['Total', totalKgNotes, 100]);
       var wsNotes = XLSX.utils.aoa_to_sheet(noteRows);
       XLSX.utils.book_append_sheet(wb, wsNotes, 'Par note');
+    }
+
+    if(years.length){
+      var yearRows = [['Année','Kg','Montant €','Prix moyen €/kg']];
+      years.forEach(function(y){
+        var pm = byYear[y].kg ? round2(byYear[y].montant/byYear[y].kg) : 0;
+        yearRows.push([y, byYear[y].kg, byYear[y].montant, pm]);
+      });
+      var wsYears = XLSX.utils.aoa_to_sheet(yearRows);
+      XLSX.utils.book_append_sheet(wb, wsYears, 'Comparatif années');
     }
 
     XLSX.writeFile(wb, 'Ventes_'+todayISO()+'.xlsx');
@@ -2618,7 +2708,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all' }; render(); };
 
 render();
 })();
