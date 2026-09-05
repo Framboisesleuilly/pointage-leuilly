@@ -262,7 +262,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all' };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all' };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -850,7 +850,7 @@ async function renderAdminDash(){
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var workers = await getWorkers();
   workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
-  var monthFilter = state.adminMonthFilter || 'all';
+  var monthFilter = state.adminMonthFilter || todayISO().slice(0,7);
 
   var entriesAll = await Promise.all(workers.map(function(w){ return getEntries(w.id); }));
   var docsAll = await Promise.all(workers.map(function(w){ return getDocuments(w.id); }));
@@ -887,7 +887,9 @@ async function renderAdminDash(){
       }
     });
     allData.push({worker:w, entries:entries, totalH: round2(totalH)});
-    totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalHFiltered)+' h ›</span></div>';
+    if(monthFilter==='all' || totalHFiltered>0){
+      totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalHFiltered)+' h ›</span></div>';
+    }
 
     var monthKeys = Object.keys(monthsWorked).sort();
     var docMonthLabels = {};
@@ -910,8 +912,11 @@ async function renderAdminDash(){
   }
 
   if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; docStatusHtml = '<p class="muted">Aucun salarié pour l\'instant.</p>'; }
+  else if(!totalsHtml){ totalsHtml = '<p class="muted">Aucun salarié n\'a d\'heures saisies pour ce mois.</p>'; }
 
   var allMonthsList = Object.keys(allMonthsSet).sort().reverse();
+  var currentMonthStr = todayISO().slice(0,7);
+  if(allMonthsList.indexOf(currentMonthStr)===-1) allMonthsList.unshift(currentMonthStr);
   var monthFilterOptions = '<option value="all"'+(monthFilter==='all'?' selected':'')+'>Tous les mois (total général)</option>' +
     allMonthsList.map(function(ym){
       var parts = ym.split('-');
@@ -3011,7 +3016,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:'all', parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all' }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all' }; render(); };
 
 render();
 })();
