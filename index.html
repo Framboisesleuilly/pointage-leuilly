@@ -131,7 +131,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chart.js/4.4.4/chart.umd.min.js"></script>
 <script>
 (function(){
 
@@ -326,6 +326,7 @@ function render(){
   if(state.screen==='adminSecteurs') return renderAdminSecteurs();
   if(state.screen==='adminParcelleCalendar') return renderAdminParcelleCalendar();
   if(state.screen==='adminVentes') return renderAdminVentes();
+  if(state.screen==='adminVentesOutils') return renderAdminVentesOutils();
   if(state.screen==='adminAgroVue') return renderAdminAgroVue();
   if(state.screen==='adminDash') return renderAdminDash();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
@@ -1860,19 +1861,14 @@ async function renderAdminSecteurs(){
   headerTitle.textContent = 'Secteurs';
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var secteurs = await getSecteurs();
-  if(!secteurs.length){
-    secteurs = [];
-    for(var i=1;i<=10;i++){ secteurs.push({ num:i, variete:'', datePlantation:'', potsParLigne:0, nombreLignes:0, lateralesParPlant:0, fruitsParLaterale:0, poidsMoyenFruit:0 }); }
-  } else {
-    // Migration douce depuis l'ancien format (pots/lateraux uniques)
-    secteurs.forEach(function(s){
-      if(s.potsParLigne===undefined){ s.potsParLigne = s.pots||0; s.nombreLignes = s.pots?1:0; }
-      if(s.lateralesParPlant===undefined){ s.lateralesParPlant = s.lateraux||0; }
-      if(s.datePlantation===undefined) s.datePlantation = '';
-      if(s.fruitsParLaterale===undefined) s.fruitsParLaterale = 0;
-      if(s.poidsMoyenFruit===undefined) s.poidsMoyenFruit = 0;
-    });
-  }
+  // Migration douce depuis l'ancien format (pots/lateraux uniques)
+  secteurs.forEach(function(s){
+    if(s.potsParLigne===undefined){ s.potsParLigne = s.pots||0; s.nombreLignes = s.pots?1:0; }
+    if(s.lateralesParPlant===undefined){ s.lateralesParPlant = s.lateraux||0; }
+    if(s.datePlantation===undefined) s.datePlantation = '';
+    if(s.fruitsParLaterale===undefined) s.fruitsParLaterale = 0;
+    if(s.poidsMoyenFruit===undefined) s.poidsMoyenFruit = 0;
+  });
   secteurs.sort(function(a,b){ return a.num-b.num; });
 
   function calcPlants(s){ return (parseFloat(s.potsParLigne)||0) * (parseFloat(s.nombreLignes)||0); }
@@ -1882,11 +1878,24 @@ async function renderAdminSecteurs(){
     return round2(kg);
   }
 
+  var usedNums = secteurs.map(function(s){ return s.num; });
+  var availableNums = [];
+  for(var n=1;n<=10;n++){ if(usedNums.indexOf(n)===-1) availableNums.push(n); }
+
   var html = '<button class="btn btn-ghost" id="btnBackSecteurs">‹ Retour à l\'agronomie</button>';
-  html += '<p class="muted" style="margin:10px 0;">Renseigne les informations de chaque secteur — le nombre de plants et le rendement prévisionnel se calculent automatiquement.</p>';
+
+  if(!secteurs.length){
+    html += '<p class="muted" style="margin:10px 0;">Aucun secteur configuré pour l\'instant. Ajoute-les au fur et à mesure, ou importe-les tous d\'un coup depuis un fichier Excel.</p>';
+  } else {
+    html += '<p class="muted" style="margin:10px 0;">Le nombre de plants et le rendement prévisionnel se calculent automatiquement.</p>';
+  }
+
   secteurs.forEach(function(s, idx){
     html += '<div class="card stack">' +
-      '<div class="worker-name">Secteur '+s.num+'</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<span class="worker-name">Secteur '+s.num+'</span>' +
+        '<button class="btn btn-ghost" style="width:auto;padding:6px 12px;color:var(--red);" data-delsecteur="'+idx+'">Supprimer</button>' +
+      '</div>' +
       '<div><label>Variété</label><input type="text" data-idx="'+idx+'" data-f="variete" value="'+(s.variete||'')+'" placeholder="Ex: Kwanza"></div>' +
       '<div><label>Date de plantation</label><input type="date" data-idx="'+idx+'" data-f="datePlantation" value="'+(s.datePlantation||'')+'"></div>' +
       '<div class="grid2">' +
@@ -1900,9 +1909,28 @@ async function renderAdminSecteurs(){
       '</div>' +
       '<div><label>Poids moyen d\'un fruit (g)</label><input type="number" min="0" step="0.1" data-idx="'+idx+'" data-f="poidsMoyenFruit" data-calc="'+idx+'" value="'+(s.poidsMoyenFruit||0)+'"></div>' +
       '<div class="total-line"><span>Rendement prévisionnel</span><span class="val" id="rendement-'+idx+'">'+calcRendement(s)+' kg</span></div>' +
+      '<button class="btn btn-gold" data-savesecteur="'+idx+'">Enregistrer ce secteur</button>' +
     '</div>';
   });
-  html += '<button class="btn btn-gold" id="btnSaveSecteurs">Enregistrer les 10 secteurs</button><div id="secteursResult" class="muted" style="text-align:center;"></div>';
+
+  if(availableNums.length){
+    html += '<div class="card stack">' +
+      '<div><label>Ajouter un secteur</label><select id="newSecteurNum">' + availableNums.map(function(n){ return '<option value="'+n+'">Secteur '+n+'</option>'; }).join('') + '</select></div>' +
+      '<button class="btn btn-primary" id="btnAddSecteur">Ajouter</button>' +
+    '</div>';
+  } else if(secteurs.length){
+    html += '<p class="muted" style="text-align:center;">Les 10 secteurs sont déjà créés.</p>';
+  }
+
+  html += '<div class="section-title">Importer depuis Excel</div>';
+  html += '<div class="card stack">' +
+    '<p class="muted">Fichier avec une ligne d\'en-tête puis, par ligne : Numéro, Variété, Date plantation (JJ/MM/AAAA), Pots par ligne, Nombre de lignes, Latérales/plant, Fruits/latérale, Poids moyen fruit (g). Remplit ou complète les secteurs correspondants.</p>' +
+    '<div><label>Fichier Excel</label><input type="file" id="secteursExcelFile" accept=".xlsx,.xls"></div>' +
+    '<button class="btn btn-gold" id="btnImportSecteurs">Importer</button>' +
+    '<div id="secteursImportResult" class="muted"></div>' +
+  '</div>';
+
+  html += '<div id="secteursResult" class="muted" style="text-align:center;"></div>';
 
   app.innerHTML = html;
 
@@ -1921,14 +1949,81 @@ async function renderAdminSecteurs(){
     });
   });
 
-  document.getElementById('btnSaveSecteurs').onclick = async function(){
-    document.querySelectorAll('input[data-idx]').forEach(function(inp){
-      var idx = parseInt(inp.getAttribute('data-idx'),10);
-      var f = inp.getAttribute('data-f');
-      secteurs[idx][f] = (f==='variete' || f==='datePlantation') ? inp.value : (parseFloat(inp.value)||0);
-    });
+  document.querySelectorAll('button[data-savesecteur]').forEach(function(btn){
+    btn.onclick = async function(){
+      var idx = parseInt(btn.getAttribute('data-savesecteur'),10);
+      document.querySelectorAll('input[data-idx="'+idx+'"]').forEach(function(inp){
+        var f = inp.getAttribute('data-f');
+        secteurs[idx][f] = (f==='variete' || f==='datePlantation') ? inp.value : (parseFloat(inp.value)||0);
+      });
+      var ok = await saveSecteurs(secteurs);
+      document.getElementById('secteursResult').textContent = ok ? 'Secteur '+secteurs[idx].num+' enregistré ✓' : 'Erreur lors de l\'enregistrement.';
+    };
+  });
+
+  document.querySelectorAll('button[data-delsecteur]').forEach(function(btn){
+    btn.onclick = async function(){
+      var idx = parseInt(btn.getAttribute('data-delsecteur'),10);
+      if(!confirm('Supprimer le secteur '+secteurs[idx].num+' ? Les données déjà saisies dans le calendrier parcelle pour ce secteur ne seront pas affectées, mais ce secteur ne sera plus configuré.')) return;
+      secteurs.splice(idx,1);
+      var ok = await saveSecteurs(secteurs);
+      if(!ok){ alert('Erreur lors de la suppression.'); return; }
+      renderAdminSecteurs();
+    };
+  });
+
+  var addBtn = document.getElementById('btnAddSecteur');
+  if(addBtn) addBtn.onclick = async function(){
+    var num = parseInt(document.getElementById('newSecteurNum').value,10);
+    secteurs.push({ num:num, variete:'', datePlantation:'', potsParLigne:0, nombreLignes:0, lateralesParPlant:0, fruitsParLaterale:0, poidsMoyenFruit:0 });
     var ok = await saveSecteurs(secteurs);
-    document.getElementById('secteursResult').textContent = ok ? 'Enregistré ✓' : 'Erreur lors de l\'enregistrement.';
+    if(!ok){ alert('Erreur lors de l\'ajout.'); return; }
+    state.parcelleEditSecteur = num;
+    renderAdminSecteurs();
+  };
+
+  document.getElementById('btnImportSecteurs').onclick = async function(){
+    var file = document.getElementById('secteursExcelFile').files[0];
+    var resultEl = document.getElementById('secteursImportResult');
+    if(!file){ alert('Choisis un fichier.'); return; }
+    resultEl.textContent = 'Lecture du fichier…';
+    try{
+      var buf = await file.arrayBuffer();
+      var wb = XLSX.read(buf, { type: 'array' });
+      var sheet = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+      var current = await getSecteurs();
+      var count = 0;
+      for(var i=1;i<rows.length;i++){
+        var row = rows[i] || [];
+        var num = parseInt(row[0],10);
+        if(!num || num<1 || num>10) continue;
+        var dateVal = row[2];
+        var dateStr = '';
+        if(dateVal instanceof Date){ dateStr = dateVal.toISOString().slice(0,10); }
+        else if(typeof dateVal === 'number'){ dateStr = new Date(Math.round((dateVal-25569)*86400*1000)).toISOString().slice(0,10); }
+        else if(dateVal){ var m = String(dateVal).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/); dateStr = m ? m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0') : ''; }
+        var entry = {
+          num: num,
+          variete: row[1] || '',
+          datePlantation: dateStr,
+          potsParLigne: parseFloat(row[3])||0,
+          nombreLignes: parseFloat(row[4])||0,
+          lateralesParPlant: parseFloat(row[5])||0,
+          fruitsParLaterale: parseFloat(row[6])||0,
+          poidsMoyenFruit: parseFloat(row[7])||0
+        };
+        var idx3 = current.findIndex(function(c){ return c.num===num; });
+        if(idx3!==-1) current[idx3] = entry; else current.push(entry);
+        count++;
+      }
+      var ok = await saveSecteurs(current);
+      if(!ok){ resultEl.textContent = 'Erreur lors de l\'enregistrement.'; return; }
+      resultEl.textContent = count + ' secteur(s) importé(s)/mis à jour.';
+      renderAdminSecteurs();
+    }catch(err){
+      resultEl.textContent = 'Erreur : ' + err.message;
+    }
   };
 }
 
@@ -2103,9 +2198,70 @@ async function renderAdminVentes(){
   headerTitle.textContent = 'Ventes';
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var allBons = await getBonsApport();
+  var currentYear = todayISO().slice(0,4);
+  var yearBons = allBons.filter(function(b){ return normalizeDateStr(b.date).slice(0,4)===currentYear; });
+
+  var totalKg = round2(yearBons.reduce(function(s,b){ return s + (parseFloat(b.kg)||0); }, 0));
+  var totalMontant = round2(yearBons.reduce(function(s,b){ return s + (parseFloat(b.montant)||0); }, 0));
+  var prixMoyen = totalKg ? round2(totalMontant/totalKg) : 0;
+
+  var byNote = {};
+  yearBons.forEach(function(b){
+    var n = resolveNote(b.note, b.variete);
+    if(!n) return;
+    byNote[n] = round2((byNote[n]||0) + (parseFloat(b.kg)||0));
+  });
+  var noteOrder = ['E','A','B','C','IQF'];
+  function baseNoteCode(n){ return n.replace(/^HS\s+/i,'').trim(); }
+  var noteKeys = Object.keys(byNote).sort(function(a,b){
+    var ba = baseNoteCode(a), bb = baseNoteCode(b);
+    var ia = noteOrder.indexOf(ba), ib = noteOrder.indexOf(bb);
+    if(ia !== ib){ if(ia===-1) return 1; if(ib===-1) return -1; return ia-ib; }
+    var aIsHs = /^HS\s+/i.test(a), bIsHs = /^HS\s+/i.test(b);
+    if(aIsHs !== bIsHs) return aIsHs ? 1 : -1;
+    return a.localeCompare(b);
+  });
+  var totalKgNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n]; }, 0));
+
+  var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour au menu</button>';
+
+  html += '<div class="kpi-card" style="margin-top:14px;">' +
+    '<div class="kpi-val">'+totalKg+' kg</div>' +
+    '<div class="kpi-lbl">Total vendu en '+currentYear+'</div>' +
+  '</div>';
+
+  html += '<div class="card">' +
+    '<div class="worker-row"><span class="worker-name">Montant total</span><span class="worker-hours">'+totalMontant+' €</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Prix moyen</span><span class="worker-hours">'+prixMoyen+' €/kg</span></div>' +
+  '</div>';
+
+  if(noteKeys.length){
+    html += '<div class="section-title">Catégories — '+currentYear+'</div>';
+    html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;">' +
+      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Note</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">%</th></tr>';
+    noteKeys.forEach(function(n){
+      var pct = totalKgNotes ? round2((byNote[n]/totalKgNotes)*100) : 0;
+      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;color:var(--ink);">'+n+'</td><td style="text-align:right;padding:10px 14px;">'+byNote[n]+'</td><td style="text-align:right;padding:10px 14px;">'+pct+'%</td></tr>';
+    });
+    html += '<tr style="border-top:2px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">Total</td><td style="text-align:right;padding:10px 14px;font-weight:700;">'+totalKgNotes+'</td><td style="text-align:right;padding:10px 14px;font-weight:700;">100%</td></tr>';
+    html += '</table>';
+  } else {
+    html += '<p class="muted">Aucune vente enregistrée pour '+currentYear+' pour l\'instant.</p>';
+  }
+
+  html += '<button class="btn btn-gold" id="btnVentesOutils">Autres outils & historique</button>';
+
+  app.innerHTML = html;
+  document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminMenu'; render(); };
+  document.getElementById('btnVentesOutils').onclick = function(){ state.screen='adminVentesOutils'; render(); };
+}
+
+async function renderAdminVentesOutils(){
+  headerTitle.textContent = 'Ventes — outils';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var allBons = await getBonsApport();
   var plantsParAnnee = await getPlantsParAnnee();
 
-  // Comparatif toutes années confondues (jamais filtré)
   var byYear = {};
   allBons.forEach(function(b){
     var y = normalizeDateStr(b.date).slice(0,4);
@@ -2175,24 +2331,24 @@ async function renderAdminVentes(){
   });
   var totalKgNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n]; }, 0));
 
-  var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour au menu</button>';
+  var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour à Ventes</button>';
 
   if(years.length){
-    html += '<div class="card" style="margin-top:14px;"><label>Année affichée</label><select id="venteYearPick">' +
+    html += '<div class="card" style="margin-top:14px;"><label>Année affichée (tableaux ci-dessous)</label><select id="venteYearPick">' +
       '<option value="all"'+(yearFilter==='all'?' selected':'')+'>Toutes les années</option>' +
       years.slice().reverse().map(function(y){ return '<option value="'+y+'"'+(yearFilter===y?' selected':'')+'>'+y+'</option>'; }).join('') +
     '</select></div>';
 
     html += '<div class="section-title">Totaux par année</div>';
     years.forEach(function(y){
-      var prixMoyen = byYear[y].kg ? round2(byYear[y].montant/byYear[y].kg) : 0;
+      var prixMoyenY = byYear[y].kg ? round2(byYear[y].montant/byYear[y].kg) : 0;
       var nbPlants = plantsParAnnee[y] || '';
       var rendementPlant = (nbPlants && parseFloat(nbPlants)>0) ? round2(byYear[y].kg/parseFloat(nbPlants)) : null;
       html += '<div class="card stack">' +
         '<div class="worker-name">'+y+'</div>' +
         '<div class="worker-row"><span class="muted">Kg</span><span class="worker-hours">'+byYear[y].kg+'</span></div>' +
         '<div class="worker-row"><span class="muted">Montant</span><span class="worker-hours">'+byYear[y].montant+' €</span></div>' +
-        '<div class="worker-row"><span class="muted">Prix moyen</span><span class="worker-hours">'+prixMoyen+' €/kg</span></div>' +
+        '<div class="worker-row"><span class="muted">Prix moyen</span><span class="worker-hours">'+prixMoyenY+' €/kg</span></div>' +
         '<div><label>Nombre de plants en '+y+'</label><input type="number" min="0" data-plantsyear="'+y+'" value="'+nbPlants+'" placeholder="Ex: 5000"></div>' +
         '<div class="worker-row"><span class="muted">Rendement par plant</span><span class="worker-hours">'+(rendementPlant!==null?rendementPlant+' kg/plant':'—')+'</span></div>' +
       '</div>';
@@ -2223,7 +2379,7 @@ async function renderAdminVentes(){
   html += '<div id="cleanupResult" class="muted" style="text-align:center;"></div>';
 
   if(noteKeys.length){
-    html += '<div class="section-title">Par note</div>';
+    html += '<div class="section-title">Par note ('+(yearFilter==='all'?'toutes années':yearFilter)+')</div>';
     html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;">' +
       '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Note</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">%</th></tr>';
     noteKeys.forEach(function(n){
@@ -2237,8 +2393,8 @@ async function renderAdminVentes(){
   if(varieteKeys.length){
     html += '<div class="section-title">Par variété</div><div class="card">';
     varieteKeys.forEach(function(v){
-      var prixMoyen = byVariete[v].kg ? round2(byVariete[v].montant/byVariete[v].kg) : 0;
-      html += '<div class="worker-row"><span class="worker-name">'+v+'<br><span class="muted" style="font-weight:400;font-size:12px;">prix moyen '+prixMoyen+' €/kg</span></span><span class="worker-hours">'+byVariete[v].kg+' kg</span></div>';
+      var prixMoyenV = byVariete[v].kg ? round2(byVariete[v].montant/byVariete[v].kg) : 0;
+      html += '<div class="worker-row"><span class="worker-name">'+v+'<br><span class="muted" style="font-weight:400;font-size:12px;">prix moyen '+prixMoyenV+' €/kg</span></span><span class="worker-hours">'+byVariete[v].kg+' kg</span></div>';
     });
     html += '</div>';
   }
@@ -2266,7 +2422,7 @@ async function renderAdminVentes(){
 
   app.innerHTML = html;
 
-  document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminMenu'; render(); };
+  document.getElementById('btnBackVentes').onclick = function(){ state.screen='adminVentes'; render(); };
 
   if(window.Chart && years.length){
     var chartColors = ['#33502E','#C89B3C','#A32638','#66655B','#8FA37E','#D6B68A','#5C7A8A'];
@@ -2347,7 +2503,7 @@ async function renderAdminVentes(){
       current[matchIdx].note = newNote;
       var ok = await saveBonsApport(current);
       if(!ok){ alert('Erreur lors de l\'enregistrement.'); return; }
-      renderAdminVentes();
+      renderAdminVentesOutils();
     };
   });
 
@@ -2376,7 +2532,7 @@ async function renderAdminVentes(){
     if(!ok){ resultEl.textContent = 'Erreur lors du nettoyage.'; return; }
     var removed = before - cleaned.length;
     resultEl.textContent = removed>0 ? (removed+' doublon(s) fusionné(s), '+cleaned.length+' ligne(s) au final.') : 'Aucun doublon trouvé.';
-    if(removed>0) renderAdminVentes();
+    if(removed>0) renderAdminVentesOutils();
   };
 
   document.getElementById('btnResetVentes').onclick = async function(){
@@ -2390,13 +2546,13 @@ async function renderAdminVentes(){
     resultEl.textContent = 'Réinitialisation en cours…';
     var ok = await saveBonsApport([]);
     resultEl.textContent = ok ? 'Tous les bons d\'apport ont été supprimés.' : 'Erreur lors de la réinitialisation.';
-    if(ok) renderAdminVentes();
+    if(ok) renderAdminVentesOutils();
   };
 
   var yearPick = document.getElementById('venteYearPick');
   if(yearPick) yearPick.addEventListener('change', function(){
     state.venteYearFilter = this.value;
-    renderAdminVentes();
+    renderAdminVentesOutils();
   });
 
   document.querySelectorAll('input[data-plantsyear]').forEach(function(inp){
@@ -2407,7 +2563,7 @@ async function renderAdminVentes(){
       if(val>0) current[y] = val; else delete current[y];
       var ok = await savePlantsParAnnee(current);
       if(!ok){ alert('Erreur lors de l\'enregistrement.'); return; }
-      renderAdminVentes();
+      renderAdminVentesOutils();
     });
   });
 
@@ -2441,7 +2597,6 @@ async function renderAdminVentes(){
       return;
     }
 
-    // Regroupe par note ET variété — la variété est maintenant un nom court et fiable (extrait proprement par l'IA), donc réutilisable comme critère.
     var groups = {};
     var groupOrder = [];
     allLignes.forEach(function(l){
@@ -2456,7 +2611,6 @@ async function renderAdminVentes(){
       if(l.date && l.date > groups[key].date) groups[key].date = l.date;
     });
 
-    // Détection des doublons : même date + même catégorie + même variété déjà présente dans les bons existants.
     var current = await getBonsApport();
     var existingKeys = {};
     current.forEach(function(b){ existingKeys[normalizeDateStr(b.date)+'|'+resolveNote(b.note, b.variete)+'|'+(b.variete||'').trim().toUpperCase()] = true; });
@@ -2484,7 +2638,7 @@ async function renderAdminVentes(){
     if(errors.length) msg += errors.length + ' fichier(s) en erreur : ' + errors.join(' / ') + '.';
     if(!ok) msg = 'Erreur lors de l\'enregistrement.';
     resultEl.textContent = msg || 'Rien à importer.';
-    if(ok && imported.length) renderAdminVentes();
+    if(ok && imported.length) renderAdminVentesOutils();
   };
 
   var exportBtn = document.getElementById('btnExportVentes');
