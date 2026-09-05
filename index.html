@@ -1942,6 +1942,8 @@ async function renderAdminParcelleCalendar(){
   var log = await getParcelleLog(date);
   var editSecteur = state.parcelleEditSecteur || secteurs[0].num;
   var existing = log.find(function(l){ return l.secteur === editSecteur; }) || {};
+  var secteurInfo = secteurs.find(function(s){ return s.num === editSecteur; }) || {};
+  var nbPotsSecteur = (parseFloat(secteurInfo.potsParLigne)||0) * (parseFloat(secteurInfo.nombreLignes)||0);
 
   var secteurOptions = secteurs.map(function(s){ return '<option value="'+s.num+'"'+(editSecteur===s.num?' selected':'')+'>Secteur '+s.num+(s.variete?' — '+s.variete:'')+'</option>'; }).join('');
 
@@ -1949,14 +1951,18 @@ async function renderAdminParcelleCalendar(){
   html += '<div class="card stack" style="margin-top:14px;">' +
     '<div><label>Date</label><input type="date" id="calDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
     '<div><label>Secteur</label><select id="calSecteurPick">'+secteurOptions+'</select></div>' +
+    (nbPotsSecteur ? '<p class="muted" style="margin:0;">'+nbPotsSecteur+' pots dans ce secteur (renseigné dans Secteurs).</p>' : '<p class="muted" style="margin:0;">Nombre de pots non renseigné pour ce secteur — le volume total ne pourra pas être calculé.</p>') +
+    '<div class="section-title" style="margin:6px 0 0;">Entrée (irrigation envoyée, par pot)</div>' +
     '<div class="grid2">' +
-      '<div><label>Irrigation (min ou L)</label><input type="number" min="0" id="calIrrigation" value="'+(existing.irrigation!==undefined?existing.irrigation:'')+'"></div>' +
-      '<div><label>Drainage (%)</label><input type="number" min="0" step="0.1" id="calDrainage" value="'+(existing.drainage!==undefined?existing.drainage:'')+'"></div>' +
+      '<div><label>EC entrée (mS/cm)</label><input type="number" min="0" step="0.01" id="calEcIn" value="'+(existing.ecIn!==undefined?existing.ecIn:'')+'"></div>' +
+      '<div><label>mL entrée / pot</label><input type="number" min="0" step="1" id="calMlIn" value="'+(existing.mlIn!==undefined?existing.mlIn:'')+'"></div>' +
     '</div>' +
+    '<div class="section-title" style="margin:6px 0 0;">Sortie (drainage récupéré, par pot)</div>' +
     '<div class="grid2">' +
-      '<div><label>EC (mS/cm)</label><input type="number" min="0" step="0.01" id="calEc" value="'+(existing.ec!==undefined?existing.ec:'')+'"></div>' +
-      '<div><label>pH</label><input type="number" min="0" step="0.01" id="calPh" value="'+(existing.ph!==undefined?existing.ph:'')+'"></div>' +
+      '<div><label>EC sortie (mS/cm)</label><input type="number" min="0" step="0.01" id="calEcOut" value="'+(existing.ecOut!==undefined?existing.ecOut:'')+'"></div>' +
+      '<div><label>mL sortie / pot</label><input type="number" min="0" step="1" id="calMlOut" value="'+(existing.mlOut!==undefined?existing.mlOut:'')+'"></div>' +
     '</div>' +
+    '<div><label>pH</label><input type="number" min="0" step="0.01" id="calPh" value="'+(existing.ph!==undefined?existing.ph:'')+'"></div>' +
     '<div><label>Notes (facultatif)</label><textarea id="calNotes" rows="2" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:9px;font-size:15px;font-family:inherit;">'+(existing.notes||'')+'</textarea></div>' +
     '<button class="btn btn-gold" id="btnSaveCal">Enregistrer ce secteur</button>' +
   '</div>';
@@ -1964,10 +1970,24 @@ async function renderAdminParcelleCalendar(){
   if(log.length){
     html += '<div class="section-title">Secteurs déjà saisis le '+frDate(date)+'</div><div class="card">';
     log.slice().sort(function(a,b){return a.secteur-b.secteur;}).forEach(function(l){
-      html += '<div class="hist-item" data-secteur="'+l.secteur+'" style="cursor:pointer;"><span class="hist-date">Secteur '+l.secteur+'</span><span class="hist-total">EC '+(l.ec!==undefined?l.ec:'—')+' / pH '+(l.ph!==undefined?l.ph:'—')+'</span></div>';
+      var secInfo = secteurs.find(function(s){ return s.num===l.secteur; }) || {};
+      var nbPots = (parseFloat(secInfo.potsParLigne)||0) * (parseFloat(secInfo.nombreLignes)||0);
+      var pctDrainage = (l.mlIn>0 && l.mlOut!==undefined) ? round2((l.mlOut/l.mlIn)*100) : null;
+      var volTotal = (nbPots && l.mlIn) ? round2((nbPots*l.mlIn)/1000) : null; // en litres
+      html += '<div class="hist-item" data-secteur="'+l.secteur+'" style="cursor:pointer;"><span class="hist-date">Secteur '+l.secteur+'<br><span class="muted" style="font-size:11px;">'+(volTotal!==null?volTotal+' L envoyés':'')+(pctDrainage!==null?' — '+pctDrainage+'% drainage':'')+'</span></span><span class="hist-total">EC '+(l.ecIn!==undefined?l.ecIn:'—')+' / pH '+(l.ph!==undefined?l.ph:'—')+'</span></div>';
     });
     html += '</div>';
   }
+
+  html += '<div class="section-title">Importer depuis une capture d\'écran</div>';
+  html += '<div class="card stack">' +
+    '<p class="muted">Connecte-toi au site de ferti-irrigation, prends une capture d\'écran du tableau du jour, dépose-la ici. L\'IA lit les valeurs par secteur, à vérifier avant import.</p>' +
+    '<div><label>Date concernée</label><input type="date" id="fertiDatePick" value="'+date+'" max="'+todayISO()+'"></div>' +
+    '<div><label>Capture d\'écran ou photo</label><input type="file" id="fertiFile" accept="image/*,.pdf,application/pdf"></div>' +
+    '<button class="btn btn-gold" id="btnAnalyzeFerti">Analyser</button>' +
+    '<div id="fertiResult" class="muted"></div>' +
+  '</div>' +
+  '<div id="fertiReview"></div>';
 
   app.innerHTML = html;
 
@@ -1990,9 +2010,10 @@ async function renderAdminParcelleCalendar(){
   document.getElementById('btnSaveCal').onclick = async function(){
     var entry = {
       secteur: editSecteur,
-      irrigation: document.getElementById('calIrrigation').value ? parseFloat(document.getElementById('calIrrigation').value) : null,
-      drainage: document.getElementById('calDrainage').value ? parseFloat(document.getElementById('calDrainage').value) : null,
-      ec: document.getElementById('calEc').value ? parseFloat(document.getElementById('calEc').value) : null,
+      ecIn: document.getElementById('calEcIn').value ? parseFloat(document.getElementById('calEcIn').value) : null,
+      mlIn: document.getElementById('calMlIn').value ? parseFloat(document.getElementById('calMlIn').value) : null,
+      ecOut: document.getElementById('calEcOut').value ? parseFloat(document.getElementById('calEcOut').value) : null,
+      mlOut: document.getElementById('calMlOut').value ? parseFloat(document.getElementById('calMlOut').value) : null,
       ph: document.getElementById('calPh').value ? parseFloat(document.getElementById('calPh').value) : null,
       notes: document.getElementById('calNotes').value,
       modifieLe: new Date().toISOString()
@@ -2004,6 +2025,78 @@ async function renderAdminParcelleCalendar(){
     if(!ok){ alert('Erreur lors de l\'enregistrement.'); return; }
     renderAdminParcelleCalendar();
   };
+
+  document.getElementById('btnAnalyzeFerti').onclick = async function(){
+    var file = document.getElementById('fertiFile').files[0];
+    var resultEl = document.getElementById('fertiResult');
+    if(!file){ alert('Choisis une capture d\'écran ou une photo.'); return; }
+    resultEl.textContent = 'Analyse en cours… (peut prendre 10-20 secondes)';
+    document.getElementById('fertiReview').innerHTML = '';
+    try{
+      file = await ensureCompatibleImage(file);
+      var base64 = await fileToBase64(file);
+      var r = await fetch('/api/analyze-document', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg', mode: 'fertigation' })
+      });
+      var data = await r.json();
+      if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error||'inconnue'); return; }
+      var lignes = data.resultats || [];
+      if(!lignes.length){ resultEl.textContent = 'Aucun secteur détecté.'; return; }
+      resultEl.textContent = lignes.length + ' secteur(s) détecté(s) — vérifie avant de confirmer.';
+      renderFertiReview(lignes);
+    }catch(err){
+      resultEl.textContent = 'Erreur : ' + err.message;
+    }
+  };
+
+  function renderFertiReview(lignes){
+    var fertiDate = document.getElementById('fertiDatePick').value || date;
+    var html2 = '<div class="section-title">Vérification avant import</div><div class="card">';
+    lignes.forEach(function(l, idx){
+      html2 += '<div style="padding:10px 0;border-bottom:1px solid var(--line);">' +
+        '<div class="muted" style="margin-bottom:6px;">Secteur <input type="number" min="1" max="10" data-f="secteur" data-idx="'+idx+'" value="'+(l.secteur||'')+'" style="width:60px;padding:6px;border:1px solid var(--line);border-radius:6px;"></div>' +
+        '<div class="grid2">' +
+          '<input type="number" step="0.01" data-f="ecIn" data-idx="'+idx+'" value="'+(l.ecIn!==null&&l.ecIn!==undefined?l.ecIn:'')+'" placeholder="EC entrée" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+          '<input type="number" step="1" data-f="mlIn" data-idx="'+idx+'" value="'+(l.mlIn!==null&&l.mlIn!==undefined?l.mlIn:'')+'" placeholder="mL entrée" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+        '</div>' +
+        '<div class="grid2" style="margin-top:6px;">' +
+          '<input type="number" step="0.01" data-f="ecOut" data-idx="'+idx+'" value="'+(l.ecOut!==null&&l.ecOut!==undefined?l.ecOut:'')+'" placeholder="EC sortie" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+          '<input type="number" step="1" data-f="mlOut" data-idx="'+idx+'" value="'+(l.mlOut!==null&&l.mlOut!==undefined?l.mlOut:'')+'" placeholder="mL sortie" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
+        '</div>' +
+        '<input type="number" step="0.01" data-f="ph" data-idx="'+idx+'" value="'+(l.ph!==null&&l.ph!==undefined?l.ph:'')+'" placeholder="pH" style="margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:8px;width:100%;">' +
+      '</div>';
+    });
+    html2 += '</div><button class="btn btn-gold" id="btnConfirmFertiImport">Confirmer et importer ('+lignes.length+' secteur(s)) pour le '+frDate(fertiDate)+'</button><div id="fertiConfirmResult" class="muted"></div>';
+    document.getElementById('fertiReview').innerHTML = html2;
+
+    document.querySelectorAll('#fertiReview input[data-f]').forEach(function(inp){
+      inp.addEventListener('change', function(){
+        var idx = parseInt(this.getAttribute('data-idx'),10);
+        var f = this.getAttribute('data-f');
+        lignes[idx][f] = this.value===''?null:parseFloat(this.value);
+      });
+    });
+
+    document.getElementById('btnConfirmFertiImport').onclick = async function(){
+      var targetDate = document.getElementById('fertiDatePick').value || date;
+      var current = await getParcelleLog(targetDate);
+      var count = 0;
+      lignes.forEach(function(l){
+        var sec = parseInt(l.secteur,10);
+        if(!sec || sec<1 || sec>10) return;
+        var idx2 = current.findIndex(function(c){ return c.secteur === sec; });
+        var entry = { secteur: sec, ecIn: l.ecIn, mlIn: l.mlIn, ecOut: l.ecOut, mlOut: l.mlOut, ph: l.ph, notes: (idx2!==-1 && current[idx2].notes) || '', modifieLe: new Date().toISOString(), importeDePhoto: true };
+        if(idx2 !== -1) current[idx2] = entry; else current.push(entry);
+        count++;
+      });
+      var ok = await saveParcelleLog(targetDate, current);
+      var confirmEl = document.getElementById('fertiConfirmResult');
+      confirmEl.textContent = ok ? (count + ' secteur(s) importé(s) avec succès pour le '+frDate(targetDate)+'.') : 'Erreur lors de l\'enregistrement.';
+      if(ok && targetDate===date) renderAdminParcelleCalendar();
+    };
+  }
 }
 
 async function renderAdminVentes(){
@@ -2462,17 +2555,19 @@ async function renderAdminAgroVue(){
   var groups = {};
   entries.forEach(function(e){
     var key = (groupBy==='secteur') ? ('Secteur '+e.secteur) : ((secteurMap[e.secteur]&&secteurMap[e.secteur].variete)||'Variété non renseignée (secteur '+e.secteur+')');
-    if(!groups[key]) groups[key] = { ecs:[], phs:[], irrigations:[], count:0 };
-    if(e.ec!==null && e.ec!==undefined) groups[key].ecs.push(e.ec);
+    if(!groups[key]) groups[key] = { ecIns:[], ecOuts:[], phs:[], mlIns:[], mlOuts:[], count:0 };
+    if(e.ecIn!==null && e.ecIn!==undefined) groups[key].ecIns.push(e.ecIn);
+    if(e.ecOut!==null && e.ecOut!==undefined) groups[key].ecOuts.push(e.ecOut);
     if(e.ph!==null && e.ph!==undefined) groups[key].phs.push(e.ph);
-    if(e.irrigation!==null && e.irrigation!==undefined) groups[key].irrigations.push(e.irrigation);
+    if(e.mlIn!==null && e.mlIn!==undefined) groups[key].mlIns.push(e.mlIn);
+    if(e.mlOut!==null && e.mlOut!==undefined) groups[key].mlOuts.push(e.mlOut);
     groups[key].count++;
   });
 
   function avg(arr){ return arr.length ? round2(arr.reduce(function(a,b){return a+b;},0)/arr.length) : null; }
 
   var groupKeys = Object.keys(groups).sort();
-  var maxEc = Math.max.apply(null, groupKeys.map(function(k){ return avg(groups[k].ecs)||0; }).concat([1]));
+  var maxEc = Math.max.apply(null, groupKeys.map(function(k){ return Math.max(avg(groups[k].ecIns)||0, avg(groups[k].ecOuts)||0); }).concat([1]));
   var maxPh = 14;
 
   var html = '<button class="btn btn-ghost" id="btnBackVue">‹ Retour à l\'agronomie</button>';
@@ -2493,24 +2588,34 @@ async function renderAdminAgroVue(){
   } else {
     groupKeys.forEach(function(k){
       var g = groups[k];
-      var ecAvg = avg(g.ecs);
+      var ecInAvg = avg(g.ecIns);
+      var ecOutAvg = avg(g.ecOuts);
       var phAvg = avg(g.phs);
-      var irrigTotal = round2(g.irrigations.reduce(function(a,b){return a+b;},0));
+      var mlInAvg = avg(g.mlIns);
+      var mlOutAvg = avg(g.mlOuts);
+      var pctDrainageAvg = (mlInAvg && mlOutAvg!==null) ? round2((mlOutAvg/mlInAvg)*100) : null;
       html += '<div class="card stack">' +
         '<div class="worker-name">'+k+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+g.count+' saisie(s) sur la période</span></div>';
-      if(ecAvg!==null){
-        html += '<div><label style="margin-bottom:4px;">EC moyen : '+ecAvg+' mS/cm</label>' +
-          '<div style="background:var(--line);border-radius:6px;height:10px;overflow:hidden;"><div style="width:'+Math.min(100, (ecAvg/maxEc)*100)+'%;background:var(--gold);height:100%;"></div></div></div>';
+      if(ecInAvg!==null){
+        html += '<div><label style="margin-bottom:4px;">EC entrée moyen : '+ecInAvg+' mS/cm</label>' +
+          '<div style="background:var(--line);border-radius:6px;height:10px;overflow:hidden;"><div style="width:'+Math.min(100, (ecInAvg/maxEc)*100)+'%;background:var(--gold);height:100%;"></div></div></div>';
+      }
+      if(ecOutAvg!==null){
+        html += '<div><label style="margin-bottom:4px;">EC sortie moyen : '+ecOutAvg+' mS/cm</label>' +
+          '<div style="background:var(--line);border-radius:6px;height:10px;overflow:hidden;"><div style="width:'+Math.min(100, (ecOutAvg/maxEc)*100)+'%;background:var(--red);height:100%;"></div></div></div>';
       }
       if(phAvg!==null){
         html += '<div><label style="margin-bottom:4px;">pH moyen : '+phAvg+'</label>' +
           '<div style="background:var(--line);border-radius:6px;height:10px;overflow:hidden;"><div style="width:'+Math.min(100, (phAvg/maxPh)*100)+'%;background:var(--moss);height:100%;"></div></div></div>';
       }
-      if(g.irrigations.length){
-        html += '<div class="muted">Irrigation cumulée : '+irrigTotal+'</div>';
+      if(mlInAvg!==null){
+        html += '<div class="muted">mL entrée moyen / pot : '+mlInAvg+'</div>';
       }
-      if(ecAvg===null && phAvg===null && !g.irrigations.length){
-        html += '<p class="muted">Pas de mesure EC/pH/irrigation sur la période.</p>';
+      if(pctDrainageAvg!==null){
+        html += '<div class="muted">% drainage moyen : '+pctDrainageAvg+'%</div>';
+      }
+      if(ecInAvg===null && phAvg===null && mlInAvg===null){
+        html += '<p class="muted">Pas de mesure sur la période.</p>';
       }
       html += '</div>';
     });
