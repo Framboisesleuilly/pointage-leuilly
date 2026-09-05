@@ -860,6 +860,7 @@ async function renderAdminDash(){
   var mods = [];
   var allMonthsSet = {};
   var docStatusHtml = '';
+  var totalHeuresFiltrees = 0;
   var moisNomsFilter = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 
   for(var i=0;i<workers.length;i++){
@@ -886,6 +887,7 @@ async function renderAdminDash(){
         });
       }
     });
+    totalHeuresFiltrees = round2(totalHeuresFiltrees + totalHFiltered);
     allData.push({worker:w, entries:entries, totalH: round2(totalH)});
     if(monthFilter==='all' || totalHFiltered>0){
       totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalHFiltered)+' h ›</span></div>';
@@ -933,9 +935,19 @@ async function renderAdminDash(){
     });
   } else { modsHtml = '<p class="muted">Aucune modification enregistrée.</p>'; }
 
+  var monthFilterLabel = 'Toutes les périodes';
+  if(monthFilter !== 'all'){
+    var mfParts = monthFilter.split('-');
+    monthFilterLabel = moisNomsFilter[parseInt(mfParts[1],10)-1] + ' ' + mfParts[0];
+  }
+
   app.innerHTML =
     '<button class="btn btn-ghost" id="btnBackMenu">‹ Retour au menu</button>' +
-    '<div class="card" style="margin-top:14px;">' +
+    '<div class="kpi-card" style="margin-top:14px;">' +
+      '<div class="kpi-val">'+totalHeuresFiltrees+' h</div>' +
+      '<div class="kpi-lbl">Total heures — '+monthFilterLabel+'</div>' +
+    '</div>' +
+    '<div class="card">' +
       '<label style="margin-bottom:6px;">Mois affiché</label><select id="monthFilterSelect">'+monthFilterOptions+'</select>' +
     '</div>' +
     '<div class="card">' +
