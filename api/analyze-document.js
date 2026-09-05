@@ -54,6 +54,23 @@ Règles :
 - "kg" et "prixKg" sont des nombres (utilise un point comme séparateur décimal, pas de virgule).
 - Si le document indique un montant total au lieu d'un prix au kg, calcule prixKg = montant / kg.
 - Ignore les lignes de total ou de sous-total, ne retourne que le détail ligne par ligne.
+- Ne réponds jamais par du texte d'excuse ou d'explication, uniquement le tableau JSON (même vide : [] si rien n'est lisible).`,
+
+  fertigation: `Voici une capture d'écran ou une photo d'un tableau de bord de ferti-irrigation (pilotage de l'arrosage en goutte-à-goutte, système de fertigation hors-sol), montrant des mesures par secteur/zone de culture : EC (conductivité électrique) et volume (en mL ou L) à l'entrée (irrigation envoyée) et à la sortie (drainage récupéré).
+
+Lis attentivement chaque ligne/zone du tableau, en identifiant le numéro de secteur (souvent affiché comme "Secteur 1", "Zone 1", "Z1", ou juste un numéro), et les valeurs d'entrée et de sortie associées.
+
+Réponds UNIQUEMENT avec un tableau JSON strict, rien d'autre : pas de texte avant, pas de texte après, pas d'explication, pas de balises markdown. Format exact :
+[
+  {"secteur": 1, "ecIn": 1.8, "mlIn": 150, "ecOut": 2.4, "mlOut": 45, "ph": 5.8},
+  {"secteur": 2, "ecIn": 1.9, "mlIn": 160, "ecOut": null, "mlOut": null, "ph": null}
+]
+
+Règles :
+- "secteur" est le numéro de secteur/zone (nombre entier). S'il n'y a pas de numéro explicite mais un ordre de lignes clair, numérote-les dans l'ordre d'apparition en commençant à 1.
+- "ecIn"/"ecOut" sont les valeurs d'EC en mS/cm (nombres). "mlIn"/"mlOut" sont les volumes en mL (convertis depuis des L si besoin : 1 L = 1000 mL). "ph" est la valeur de pH si présente.
+- Si une valeur n'est pas visible pour une ligne, mets null pour ce champ précis plutôt que de l'inventer.
+- Ignore les lignes de total, moyenne, ou résumé général — ne retourne que le détail secteur par secteur.
 - Ne réponds jamais par du texte d'excuse ou d'explication, uniquement le tableau JSON (même vide : [] si rien n'est lisible).`
 };
 
@@ -71,7 +88,7 @@ export default async function handler(req, res) {
   }
   const prompt = PROMPTS[mode];
   if (!prompt) {
-    return res.status(400).json({ error: 'mode inconnu (attendu: timesheet, tri, bonApport)' });
+    return res.status(400).json({ error: 'mode inconnu (attendu: timesheet, tri, bonApport, fertigation)' });
   }
 
   const isPdf = mediaType === 'application/pdf';
