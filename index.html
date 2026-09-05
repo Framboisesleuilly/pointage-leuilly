@@ -2209,7 +2209,9 @@ async function renderAdminVentes(){
   yearBons.forEach(function(b){
     var n = resolveNote(b.note, b.variete);
     if(!n) return;
-    byNote[n] = round2((byNote[n]||0) + (parseFloat(b.kg)||0));
+    if(!byNote[n]) byNote[n] = { kg:0, montant:0 };
+    byNote[n].kg = round2(byNote[n].kg + (parseFloat(b.kg)||0));
+    byNote[n].montant = round2(byNote[n].montant + (parseFloat(b.montant)||0));
   });
   var noteOrder = ['E','A','B','C','IQF'];
   function baseNoteCode(n){ return n.replace(/^HS\s+/i,'').trim(); }
@@ -2221,7 +2223,7 @@ async function renderAdminVentes(){
     if(aIsHs !== bIsHs) return aIsHs ? 1 : -1;
     return a.localeCompare(b);
   });
-  var totalKgNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n]; }, 0));
+  var totalKgNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n].kg; }, 0));
 
   var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour au menu</button>';
 
@@ -2238,12 +2240,15 @@ async function renderAdminVentes(){
   if(noteKeys.length){
     html += '<div class="section-title">Catégories — '+currentYear+'</div>';
     html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;">' +
-      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Note</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">%</th></tr>';
+      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Note</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">%</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Prix moyen</th></tr>';
+    var totalMontantNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n].montant; }, 0));
     noteKeys.forEach(function(n){
-      var pct = totalKgNotes ? round2((byNote[n]/totalKgNotes)*100) : 0;
-      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;color:var(--ink);">'+n+'</td><td style="text-align:right;padding:10px 14px;">'+byNote[n]+'</td><td style="text-align:right;padding:10px 14px;">'+pct+'%</td></tr>';
+      var pct = totalKgNotes ? round2((byNote[n].kg/totalKgNotes)*100) : 0;
+      var pm = byNote[n].kg ? round2(byNote[n].montant/byNote[n].kg) : 0;
+      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;color:var(--ink);">'+n+'</td><td style="text-align:right;padding:10px 14px;">'+byNote[n].kg+'</td><td style="text-align:right;padding:10px 14px;">'+pct+'%</td><td style="text-align:right;padding:10px 14px;">'+pm+' €/kg</td></tr>';
     });
-    html += '<tr style="border-top:2px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">Total</td><td style="text-align:right;padding:10px 14px;font-weight:700;">'+totalKgNotes+'</td><td style="text-align:right;padding:10px 14px;font-weight:700;">100%</td></tr>';
+    var pmTotal = totalKgNotes ? round2(totalMontantNotes/totalKgNotes) : 0;
+    html += '<tr style="border-top:2px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">Total</td><td style="text-align:right;padding:10px 14px;font-weight:700;">'+totalKgNotes+'</td><td style="text-align:right;padding:10px 14px;font-weight:700;">100%</td><td style="text-align:right;padding:10px 14px;font-weight:700;">'+pmTotal+' €/kg</td></tr>';
     html += '</table>';
   } else {
     html += '<p class="muted">Aucune vente enregistrée pour '+currentYear+' pour l\'instant.</p>';
@@ -2304,8 +2309,9 @@ async function renderAdminVentesOutils(){
   bons.forEach(function(b){
     var n = resolveNote(b.note, b.variete);
     if(n){
-      if(!byNote[n]) byNote[n] = 0;
-      byNote[n] = round2(byNote[n] + (parseFloat(b.kg)||0));
+      if(!byNote[n]) byNote[n] = { kg:0, montant:0 };
+      byNote[n].kg = round2(byNote[n].kg + (parseFloat(b.kg)||0));
+      byNote[n].montant = round2(byNote[n].montant + (parseFloat(b.montant)||0));
     }
     var v = (b.variete||'').trim();
     if(v){
@@ -2329,7 +2335,7 @@ async function renderAdminVentesOutils(){
     if(aIsHs !== bIsHs) return aIsHs ? 1 : -1;
     return a.localeCompare(b);
   });
-  var totalKgNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n]; }, 0));
+  var totalKgNotes = round2(noteKeys.reduce(function(s,n){ return s+byNote[n].kg; }, 0));
 
   var html = '<button class="btn btn-ghost" id="btnBackVentes">‹ Retour à Ventes</button>';
 
@@ -2381,12 +2387,15 @@ async function renderAdminVentesOutils(){
   if(noteKeys.length){
     html += '<div class="section-title">Par note ('+(yearFilter==='all'?'toutes années':yearFilter)+')</div>';
     html += '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;">' +
-      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Note</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">%</th></tr>';
+      '<tr style="background:var(--bg);"><th style="text-align:left;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Note</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Kg</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">%</th><th style="text-align:right;padding:10px 14px;font-size:13px;color:var(--ink-soft);">Prix moyen</th></tr>';
+    var totalMontantNotesOutils = round2(noteKeys.reduce(function(s,n){ return s+byNote[n].montant; }, 0));
     noteKeys.forEach(function(n){
-      var pct = totalKgNotes ? round2((byNote[n]/totalKgNotes)*100) : 0;
-      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;color:var(--ink);">'+n+'</td><td style="text-align:right;padding:10px 14px;">'+byNote[n]+'</td><td style="text-align:right;padding:10px 14px;">'+pct+'%</td></tr>';
+      var pct = totalKgNotes ? round2((byNote[n].kg/totalKgNotes)*100) : 0;
+      var pm = byNote[n].kg ? round2(byNote[n].montant/byNote[n].kg) : 0;
+      html += '<tr style="border-top:1px solid var(--line);"><td style="padding:10px 14px;font-weight:700;color:var(--ink);">'+n+'</td><td style="text-align:right;padding:10px 14px;">'+byNote[n].kg+'</td><td style="text-align:right;padding:10px 14px;">'+pct+'%</td><td style="text-align:right;padding:10px 14px;">'+pm+' €/kg</td></tr>';
     });
-    html += '<tr style="border-top:2px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">Total</td><td style="text-align:right;padding:10px 14px;font-weight:700;">'+totalKgNotes+'</td><td style="text-align:right;padding:10px 14px;font-weight:700;">100%</td></tr>';
+    var pmTotalOutils = totalKgNotes ? round2(totalMontantNotesOutils/totalKgNotes) : 0;
+    html += '<tr style="border-top:2px solid var(--line);"><td style="padding:10px 14px;font-weight:700;">Total</td><td style="text-align:right;padding:10px 14px;font-weight:700;">'+totalKgNotes+'</td><td style="text-align:right;padding:10px 14px;font-weight:700;">100%</td><td style="text-align:right;padding:10px 14px;font-weight:700;">'+pmTotalOutils+' €/kg</td></tr>';
     html += '</table>';
   }
 
@@ -2654,12 +2663,13 @@ async function renderAdminVentesOutils(){
     XLSX.utils.book_append_sheet(wb, ws, 'Ventes');
 
     if(noteKeys.length){
-      var noteRows = [['Note','Kg','%']];
+      var noteRows = [['Note','Kg','%','Prix moyen €/kg']];
       noteKeys.forEach(function(n){
-        var pct = totalKgNotes ? round2((byNote[n]/totalKgNotes)*100) : 0;
-        noteRows.push([n, byNote[n], pct]);
+        var pct = totalKgNotes ? round2((byNote[n].kg/totalKgNotes)*100) : 0;
+        var pm = byNote[n].kg ? round2(byNote[n].montant/byNote[n].kg) : 0;
+        noteRows.push([n, byNote[n].kg, pct, pm]);
       });
-      noteRows.push(['Total', totalKgNotes, 100]);
+      noteRows.push(['Total', totalKgNotes, 100, '']);
       var wsNotes = XLSX.utils.aoa_to_sheet(noteRows);
       XLSX.utils.book_append_sheet(wb, wsNotes, 'Par note');
     }
