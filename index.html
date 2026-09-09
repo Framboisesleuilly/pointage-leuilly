@@ -2848,6 +2848,7 @@ async function renderAdminRythme(){
   var rendementPied = totalPlants>0 ? round2(totalKgToday/totalPlants) : null;
 
   var kgHByNum = {};
+  var horairesByNum = {};
   for(var i=0;i<allNums.length;i++){
     var n = allNums[i];
     var w = numToWorker[n];
@@ -2857,8 +2858,10 @@ async function renderAdminRythme(){
       var heures = dayEntry ? computeTotal(dayEntry) : null;
       var todayKg = perCueilleurPerDay[n][6]||0;
       kgHByNum[n] = (heures && heures>0) ? round2(todayKg/heures) : null;
+      horairesByNum[n] = dayEntry ? { matinDebut: dayEntry.matinDebut||'', matinFin: dayEntry.matinFin||'', apremDebut: dayEntry.apremDebut||'', apremFin: dayEntry.apremFin||'' } : null;
     } else {
       kgHByNum[n] = null;
+      horairesByNum[n] = null;
     }
   }
 
@@ -2954,20 +2957,21 @@ async function renderAdminRythme(){
   var exportBtn = document.getElementById('btnExportRythme');
   if(exportBtn) exportBtn.onclick = function(){
     var wb = XLSX.utils.book_new();
-    var rows = [['Rang','Cueilleur','N°','Kg du jour','Kg/h', dateList[0]+' (kg)', dateList[1]+' (kg)', dateList[2]+' (kg)', dateList[3]+' (kg)', dateList[4]+' (kg)', dateList[5]+' (kg)', dateList[6]+' (kg)']];
+    var rows = [['Rang','Cueilleur','N°','Matin début','Matin fin','Après-midi début','Après-midi fin','Kg du jour','Kg/h', dateList[0]+' (kg)', dateList[1]+' (kg)', dateList[2]+' (kg)', dateList[3]+' (kg)', dateList[4]+' (kg)', dateList[5]+' (kg)', dateList[6]+' (kg)']];
     linkedNums.forEach(function(n, rank){
       var w = numToWorker[n];
-      var row = [rank+1, w.prenom, n, round2(perCueilleurPerDay[n][6]||0), kgHByNum[n]!==null?kgHByNum[n]:''];
+      var h = horairesByNum[n];
+      var row = [rank+1, w.prenom, n, h?h.matinDebut:'', h?h.matinFin:'', h?h.apremDebut:'', h?h.apremFin:'', round2(perCueilleurPerDay[n][6]||0), kgHByNum[n]!==null?kgHByNum[n]:''];
       perCueilleurPerDay[n].forEach(function(kg){ row.push(kg); });
       rows.push(row);
     });
     unlinkedNums.forEach(function(n){
-      var row = ['', 'Non identifié', n, round2(perCueilleurPerDay[n][6]||0), ''];
+      var row = ['', 'Non identifié', n, '', '', '', '', round2(perCueilleurPerDay[n][6]||0), ''];
       perCueilleurPerDay[n].forEach(function(kg){ row.push(kg); });
       rows.push(row);
     });
     rows.push([]);
-    rows.push(['Rendement au pied général', '', '', totalKgToday+' kg / '+totalPlants+' plants', rendementPied!==null?rendementPied+' kg/plant':'']);
+    rows.push(['Rendement au pied général', '', '', '', '', '', '', totalKgToday+' kg / '+totalPlants+' plants', rendementPied!==null?rendementPied+' kg/plant':'']);
     var ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Rythme cueillette');
     XLSX.writeFile(wb, 'Rythme_cueillette_'+date+'.xlsx');
