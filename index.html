@@ -3010,6 +3010,7 @@ async function renderAdminRythme(){
       html += '</div>';
     }
     html += '<button class="btn btn-gold" id="btnExportRythme">Exporter en Excel</button>';
+    html += '<button class="btn btn-ghost" id="btnExportSemaine">Exporter la semaine (kg/h par jour)</button>';
   }
 
   app.innerHTML = html;
@@ -3044,6 +3045,61 @@ async function renderAdminRythme(){
     var ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Rythme cueillette');
     XLSX.writeFile(wb, 'Rythme_cueillette_'+date+'.xlsx');
+  };
+
+  var exportSemaineBtn = document.getElementById('btnExportSemaine');
+  if(exportSemaineBtn) exportSemaineBtn.onclick = async function(){
+    exportSemaineBtn.textContent = 'Préparation…';
+    var d0w = new Date(date+'T00:00:00Z');
+    var dow = (d0w.getUTCDay()+6)%7; // lundi=0
+    var monday = new Date(d0w); monday.setUTCDate(monday.getUTCDate()-dow);
+    var weekDates = [];
+    for(var i=0;i<7;i++){ var dd=new Date(monday); dd.setUTCDate(dd.getUTCDate()+i); weekDates.push(dd.toISOString().slice(0,10)); }
+    var joursNoms = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+
+    var barqWeek = await Promise.all(weekDates.map(function(dd){ return getBarquettes(dd); }));
+    var linkedWorkersList = Object.keys(numToWorker).map(function(n){ return numToWorker[n]; });
+    var entriesWeek = await Promise.all(linkedWorkersList.map(function(w){ return getEntries(w.id); }));
+
+    var dayColumns = weekDates.map(function(dd, di){
+      var rowsDay = [];
+      linkedWorkersList.forEach(function(w, wi){
+        var dayEntry = entriesWeek[wi][dd];
+        if(!dayEntry) return;
+        var heures = computeTotal(dayEntry);
+        if(!heures) return;
+        var dayBarq = barqWeek[di].filter(function(e){ return e.cueilleurNum===w.numeroCueilleur; });
+        var kg = round2(dayBarq.reduce(function(s,e){ return s+(parseFloat(e.barquettes)||0)*0.125; },0));
+        if(!kg) return;
+        rowsDay.push({ prenom:w.prenom, kgH: round2(kg/heures) });
+      });
+      rowsDay.sort(function(a,b){ return b.kgH-a.kgH; });
+      return rowsDay;
+    });
+
+    if(dayColumns.every(function(c){ return !c.length; })){
+      exportSemaineBtn.textContent = 'Exporter la semaine (kg/h par jour)';
+      alert('Aucune donnée sur cette semaine (du '+frDate(weekDates[0])+' au '+frDate(weekDates[6])+').');
+      return;
+    }
+
+    var headerRow = [];
+    weekDates.forEach(function(dd,di){ headerRow.push(joursNoms[di]); headerRow.push(''); });
+    var maxRows = Math.max.apply(null, dayColumns.map(function(c){return c.length;}).concat([0]));
+    var rowsOut = [headerRow];
+    for(var r=0;r<maxRows;r++){
+      var rowOut = [];
+      dayColumns.forEach(function(col){
+        if(col[r]){ rowOut.push(col[r].prenom); rowOut.push(col[r].kgH); }
+        else { rowOut.push(''); rowOut.push(''); }
+      });
+      rowsOut.push(rowOut);
+    }
+    var wbSemaine = XLSX.utils.book_new();
+    var wsSemaine = XLSX.utils.aoa_to_sheet(rowsOut);
+    XLSX.utils.book_append_sheet(wbSemaine, wsSemaine, 'Rythme semaine');
+    XLSX.writeFile(wbSemaine, 'Rythme_semaine_'+weekDates[0]+'.xlsx');
+    exportSemaineBtn.textContent = 'Exporter la semaine (kg/h par jour)';
   };
 }
 
