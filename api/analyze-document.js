@@ -71,6 +71,23 @@ Règles :
 - "ecIn"/"ecOut" sont les valeurs d'EC en mS/cm (nombres). "mlIn"/"mlOut" sont les volumes en mL (convertis depuis des L si besoin : 1 L = 1000 mL). "ph" est la valeur de pH si présente.
 - Si une valeur n'est pas visible pour une ligne, mets null pour ce champ précis plutôt que de l'inventer.
 - Ignore les lignes de total, moyenne, ou résumé général — ne retourne que le détail secteur par secteur.
+- Ne réponds jamais par du texte d'excuse ou d'explication, uniquement le tableau JSON (même vide : [] si rien n'est lisible).`,
+
+  engrais: `Voici un bon de livraison ou une facture d'engrais/fertilisants agricoles au format PDF ou photo, indiquant le ou les produits livrés et leur quantité.
+
+Lis attentivement chaque ligne indiquant un produit et une quantité livrée.
+
+Réponds UNIQUEMENT avec un tableau JSON strict, rien d'autre : pas de texte avant, pas de texte après, pas d'explication, pas de balises markdown. Format exact :
+[
+  {"date": "2026-08-05", "produit": "Engrais NPK 15-15-15", "quantite": 500, "unite": "kg"},
+  {"date": "2026-08-05", "produit": "Acide nitrique", "quantite": 25, "unite": "L"}
+]
+
+Règles :
+- "date" au format AAAA-MM-JJ, celle du bon de livraison. Si une seule date apparaît, applique-la à toutes les lignes.
+- "produit" est le nom du produit tel qu'écrit sur le document.
+- "quantite" est un nombre. "unite" est "kg" ou "L" — convertis les tonnes en kg (1 t = 1000 kg) et les mL en L (1000 mL = 1 L) si besoin.
+- Ignore les lignes de total, sous-total, transport, ou frais divers — uniquement les produits livrés.
 - Ne réponds jamais par du texte d'excuse ou d'explication, uniquement le tableau JSON (même vide : [] si rien n'est lisible).`
 };
 
@@ -88,7 +105,7 @@ export default async function handler(req, res) {
   }
   const prompt = PROMPTS[mode];
   if (!prompt) {
-    return res.status(400).json({ error: 'mode inconnu (attendu: timesheet, tri, bonApport, fertigation)' });
+    return res.status(400).json({ error: 'mode inconnu (attendu: timesheet, tri, bonApport, fertigation, engrais)' });
   }
 
   const isPdf = mediaType === 'application/pdf';
