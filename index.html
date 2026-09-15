@@ -1929,10 +1929,13 @@ async function renderAdminSecteurs(){
   secteurs.sort(function(a,b){ return a.num-b.num; });
 
   function calcPlants(s){ return (parseFloat(s.potsParLigne)||0) * (parseFloat(s.nombreLignes)||0); }
+  function calcRendementParPlant(s){
+    var kg = (parseFloat(s.lateralesParPlant)||0) * (parseFloat(s.fruitsParLaterale)||0) * (parseFloat(s.poidsMoyenFruit)||0) / 1000;
+    return round2(kg);
+  }
   function calcRendement(s){
     var plants = calcPlants(s);
-    var kg = plants * (parseFloat(s.lateralesParPlant)||0) * (parseFloat(s.fruitsParLaterale)||0) * (parseFloat(s.poidsMoyenFruit)||0) / 1000;
-    return round2(kg);
+    return round2(plants * calcRendementParPlant(s));
   }
 
   var usedNums = secteurs.map(function(s){ return s.num; });
@@ -1965,7 +1968,8 @@ async function renderAdminSecteurs(){
         '<div><label>Fruits / latérale</label><input type="number" min="0" data-idx="'+idx+'" data-f="fruitsParLaterale" data-calc="'+idx+'" value="'+(s.fruitsParLaterale||0)+'"></div>' +
       '</div>' +
       '<div><label>Poids moyen d\'un fruit (g)</label><input type="number" min="0" step="0.1" data-idx="'+idx+'" data-f="poidsMoyenFruit" data-calc="'+idx+'" value="'+(s.poidsMoyenFruit||0)+'"></div>' +
-      '<div class="total-line"><span>Rendement prévisionnel</span><span class="val" id="rendement-'+idx+'">'+calcRendement(s)+' kg</span></div>' +
+      '<div class="total-line" style="border-top:none;padding-top:0;"><span>Rendement prévisionnel par plant</span><span class="val" id="rendementplant-'+idx+'">'+calcRendementParPlant(s)+' kg/plant</span></div>' +
+      '<div class="total-line"><span>Rendement prévisionnel (secteur)</span><span class="val" id="rendement-'+idx+'">'+calcRendement(s)+' kg</span></div>' +
       '<button class="btn btn-gold" data-savesecteur="'+idx+'">Enregistrer ce secteur</button>' +
     '</div>';
   });
@@ -2002,6 +2006,7 @@ async function renderAdminSecteurs(){
         if(f && f!=='variete' && f!=='datePlantation') s[f] = parseFloat(i2.value)||0;
       });
       document.getElementById('plants-'+idx).textContent = calcPlants(s);
+      document.getElementById('rendementplant-'+idx).textContent = calcRendementParPlant(s) + ' kg/plant';
       document.getElementById('rendement-'+idx).textContent = calcRendement(s) + ' kg';
     });
   });
@@ -2904,6 +2909,14 @@ async function renderAdminStockEngrais(){
     '<div id="stockResult" class="muted"></div>' +
   '</div>';
 
+  html += '<div class="section-title">Importer un bon de livraison — PDF ou photo</div>';
+  html += '<div class="card stack">' +
+    '<p class="muted">Dépose le bon de livraison ou la facture d\'engrais reçu(e) — plusieurs à la fois si besoin. L\'IA lit les produits et quantités et les ajoute directement en entrée de stock.</p>' +
+    '<div><label>Fichier(s)</label><input type="file" id="engraisPdfFile" accept="image/*,.pdf,application/pdf" multiple></div>' +
+    '<button class="btn btn-gold" id="btnAnalyzeEngrais">Analyser et importer</button>' +
+    '<div id="engraisImportResult" class="muted"></div>' +
+  '</div>';
+
   if(mouvements.length){
     html += '<div class="section-title">Historique des mouvements</div><div class="card">';
     mouvements.slice(0,50).forEach(function(m){
@@ -2915,6 +2928,59 @@ async function renderAdminStockEngrais(){
   app.innerHTML = html;
 
   document.getElementById('btnBackStock').onclick = function(){ state.screen='adminAgroMenu'; render(); };
+
+  document.getElementById('btnAnalyzeEngrais').onclick = async function(){
+    var files = Array.from(document.getElementById('engraisPdfFile').files);
+    var resultEl = document.getElementById('engraisImportResult');
+    if(!files.length){ alert('Choisis au moins un fichier.'); return; }
+    var allLignes = [];
+    var errors = [];
+    for(var i=0;i<files.length;i++){
+      resultEl.textContent = 'Analyse du fichier '+(i+1)+'/'+files.length+' ("'+files[i].name+'")… (peut prendre 10-20 secondes)';
+      try{
+        var file = await ensureCompatibleImage(files[i]);
+        var base64 = await fileToBase64(file);
+        var r = await fetch('/api/analyze-document', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'application/pdf', mode: 'engrais' })
+        });
+        var data = await r.json();
+        if(!r.ok || data.error){ errors.push(files[i].name+' : '+(data.error||'erreur inconnue')); continue; }
+        allLignes = allLignes.concat(data.resultats || []);
+      }catch(err){
+        errors.push(files[i].name+' : '+err.message);
+      }
+    }
+    if(!allLignes.length){
+      resultEl.textContent = 'Aucune ligne détectée.' + (errors.length ? ' Erreurs : '+errors.join(' / ') : '');
+      return;
+    }
+    var current = await getStockEngrais();
+    var imported = [];
+    allLignes.forEach(function(l){
+      var qte = parseFloat(l.quantite)||0;
+      if(!qte || !l.produit) return;
+      current.push({
+        date: l.date || todayISO(),
+        produit: l.produit.trim(),
+        type: 'entree',
+        quantite: qte,
+        unite: (l.unite||'kg').trim(),
+        notes: '',
+        creeLe: new Date().toISOString(),
+        importeDePdf: true
+      });
+      imported.push(l.produit+' — '+qte+' '+(l.unite||'kg'));
+    });
+    var ok = imported.length ? await saveStockEngrais(current) : true;
+    var msg = '';
+    if(imported.length) msg += imported.length + ' entrée(s) ajoutée(s) : ' + imported.join(' / ') + '. ';
+    if(errors.length) msg += errors.length + ' fichier(s) en erreur : ' + errors.join(' / ') + '.';
+    if(!ok) msg = 'Erreur lors de l\'enregistrement.';
+    resultEl.textContent = msg || 'Rien à importer.';
+    if(ok && imported.length) renderAdminStockEngrais();
+  };
 
   document.getElementById('btnAddMouvement').onclick = async function(){
     var produit = document.getElementById('stockProduit').value.trim();
