@@ -3207,7 +3207,7 @@ async function renderAdminRythmePeriode(){
     var dStart = new Date(fromVal+'T00:00:00Z');
     var dEnd = new Date(toVal+'T00:00:00Z');
     var nbJours = Math.round((dEnd-dStart)/86400000)+1;
-    if(nbJours > 120){ alert('Période trop longue (max 120 jours), réduis-la.'); return; }
+    if(nbJours > 60){ alert('Période trop longue pour un détail jour par jour (max 60 jours), réduis-la.'); return; }
     var periodeDates = [];
     for(var d=new Date(dStart); d<=dEnd; d.setUTCDate(d.getUTCDate()+1)){ periodeDates.push(d.toISOString().slice(0,10)); }
 
@@ -3215,33 +3215,36 @@ async function renderAdminRythmePeriode(){
     var barqPeriode = await Promise.all(periodeDates.map(function(dd){ return getBarquettes(dd); }));
     var entriesPeriode = await Promise.all(linkedWorkersList.map(function(w){ return getEntries(w.id); }));
 
-    var rows = [];
-    linkedWorkersList.forEach(function(w, wi){
-      var totalKg = 0, totalHeures = 0;
-      periodeDates.forEach(function(dd, di){
+    // Rythme journalier : un classement kg/h indépendant pour chaque jour de la période (pas de cumul).
+    var dayColumns = periodeDates.map(function(dd, di){
+      var rowsDay = [];
+      linkedWorkersList.forEach(function(w, wi){
         var dayEntry = entriesPeriode[wi][dd];
         if(!dayEntry) return;
         var heures = computeTotal(dayEntry);
         if(!heures) return;
         var kg = round2(barqPeriode[di].filter(function(e){ return e.cueilleurNum===w.numeroCueilleur; }).reduce(function(s,e){ return s+(parseFloat(e.barquettes)||0)*0.125; },0));
-        totalKg = round2(totalKg + kg);
-        totalHeures = round2(totalHeures + heures);
+        if(!kg) return;
+        rowsDay.push({ prenom: w.prenom, kg: kg, heures: heures, kgH: round2(kg/heures) });
       });
-      if(totalHeures>0 || totalKg>0){
-        rows.push({ prenom: w.prenom, totalKg: totalKg, totalHeures: totalHeures, kgH: totalHeures>0?round2(totalKg/totalHeures):0 });
-      }
+      rowsDay.sort(function(a,b){ return b.kgH-a.kgH; });
+      return rowsDay;
     });
-    rows.sort(function(a,b){ return b.kgH-a.kgH; });
 
-    var html2 = '<div class="section-title">Du '+frDate(fromVal)+' au '+frDate(toVal)+' ('+nbJours+' jour(s))</div>';
-    if(!rows.length){
+    var joursAvecDonnees = periodeDates.filter(function(dd,di){ return dayColumns[di].length>0; });
+
+    var html2 = '<div class="section-title">Du '+frDate(fromVal)+' au '+frDate(toVal)+' ('+nbJours+' jour(s)) — rythme journalier</div>';
+    if(!joursAvecDonnees.length){
       html2 += '<p class="muted">Aucune donnée sur cette période.</p>';
     } else {
-      html2 += '<div class="card">';
-      rows.forEach(function(r, rank){
-        html2 += '<div class="worker-row"><span class="worker-name">'+(rank+1)+'. '+r.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+r.totalHeures+' h — '+r.totalKg+' kg</span></span><span class="worker-hours">'+r.kgH+' kg/h</span></div>';
+      periodeDates.forEach(function(dd, di){
+        if(!dayColumns[di].length) return;
+        html2 += '<div class="section-title" style="font-size:14px;">'+frDate(dd)+'</div><div class="card">';
+        dayColumns[di].forEach(function(r, rank){
+          html2 += '<div class="worker-row"><span class="worker-name">'+(rank+1)+'. '+r.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+r.heures+' h — '+r.kg+' kg</span></span><span class="worker-hours">'+r.kgH+' kg/h</span></div>';
+        });
+        html2 += '</div>';
       });
-      html2 += '</div>';
       html2 += '<button class="btn btn-ghost" id="btnExportPeriode">Exporter en Excel</button>';
     }
     resultEl.innerHTML = html2;
@@ -3249,11 +3252,21 @@ async function renderAdminRythmePeriode(){
     var exportBtn2 = document.getElementById('btnExportPeriode');
     if(exportBtn2) exportBtn2.onclick = function(){
       var wb = XLSX.utils.book_new();
-      var rowsOut = [['Rang','Cueilleur','Total heures','Total kg','Kg/h']];
-      rows.forEach(function(r, rank){ rowsOut.push([rank+1, r.prenom, r.totalHeures, r.totalKg, r.kgH]); });
+      var headerRow = [];
+      periodeDates.forEach(function(dd){ headerRow.push(frDate(dd)); headerRow.push(''); });
+      var maxRows = Math.max.apply(null, dayColumns.map(function(c){return c.length;}).concat([0]));
+      var rowsOut = [headerRow];
+      for(var r=0;r<maxRows;r++){
+        var rowOut = [];
+        dayColumns.forEach(function(col){
+          if(col[r]){ rowOut.push(col[r].prenom); rowOut.push(col[r].kgH); }
+          else { rowOut.push(''); rowOut.push(''); }
+        });
+        rowsOut.push(rowOut);
+      }
       var ws = XLSX.utils.aoa_to_sheet(rowsOut);
-      XLSX.utils.book_append_sheet(wb, ws, 'Rythme période');
-      XLSX.writeFile(wb, 'Rythme_'+fromVal+'_au_'+toVal+'.xlsx');
+      XLSX.utils.book_append_sheet(wb, ws, 'Rythme journalier');
+      XLSX.writeFile(wb, 'Rythme_journalier_'+fromVal+'_au_'+toVal+'.xlsx');
     };
   }
 
