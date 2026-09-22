@@ -182,6 +182,8 @@ async function getTaches(){ return getAgroData('taches', []); }
 async function saveTaches(data){ return saveAgroData('taches', data); }
 async function getSecteurs(){ return getAgroData('secteurs', []); }
 async function saveSecteurs(list){ return saveAgroData('secteurs', list); }
+async function getAcomptes(){ return getAgroData('acomptes', {}); }
+async function saveAcomptes(data){ return saveAgroData('acomptes', data); }
 async function getParcelleLog(date){
   try{ var r = await fetch('/api/parcelle?date='+date); return r.ok ? await r.json() : []; }catch(err){ return []; }
 }
@@ -284,7 +286,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives' };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -1031,6 +1033,14 @@ async function renderAdminWorkerDetail(){
   var wasEdited = current.history && current.history.length > 0;
   var lockedMonth = validations[editDate.slice(0,7)] || null;
 
+  var acomptesAll = await getAcomptes();
+  var acomptesWorker = acomptesAll[w.id] || [];
+  var acompteMonth = state.acompteMonth || todayISO().slice(0,7);
+  var acomptesMois = acomptesWorker.filter(function(a){ return (a.date||'').slice(0,7)===acompteMonth; });
+  var totalAcomptesMois = round2(acomptesMois.reduce(function(s,a){ return s+(parseFloat(a.montant)||0); }, 0));
+  var moisNomsAcompte = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  var acompteMonthLabel = moisNomsAcompte[parseInt(acompteMonth.split('-')[1],10)-1] + ' ' + acompteMonth.split('-')[0];
+
   var html = '<button class="btn btn-ghost" id="btnBackAdmin">‹ Retour à l\'équipe</button>';
   html += '<div class="card stack">' +
     '<div style="display:flex;align-items:center;justify-content:space-between;">' +
@@ -1039,6 +1049,26 @@ async function renderAdminWorkerDetail(){
     '</div>' +
     '<div><label>N° cueilleur (1-56, visible uniquement ici)</label><input type="number" min="1" max="56" id="numCueilleurInput" value="'+(w.numeroCueilleur||'')+'"></div>' +
   '</div>';
+
+  html += '<div class="section-title">Acomptes</div>';
+  html += '<div class="card stack">' +
+    '<div><label>Mois affiché</label><input type="month" id="acompteMonthPick" value="'+acompteMonth+'"></div>' +
+    '<div class="total-line"><span>Total acomptes — '+acompteMonthLabel+'</span><span class="val">'+totalAcomptesMois+' €</span></div>';
+  if(acomptesMois.length){
+    acomptesMois.forEach(function(a){
+      var realIdx = acomptesWorker.indexOf(a);
+      html += '<div class="hist-item"><span class="hist-date">'+frDate(a.date)+(a.notes?' — '+a.notes:'')+'</span><span class="hist-total">'+a.montant+' € <button class="btn btn-ghost" style="width:auto;padding:2px 8px;margin-left:6px;" data-delacompte="'+realIdx+'">✕</button></span></div>';
+    });
+  }
+  html += '<div class="grid2">' +
+      '<div><label>Date</label><input type="date" id="acompteDate" value="'+todayISO()+'" max="'+todayISO()+'"></div>' +
+      '<div><label>Montant (€)</label><input type="number" min="0" step="1" id="acompteMontant"></div>' +
+    '</div>' +
+    '<div><label>Notes (facultatif)</label><input type="text" id="acompteNotes" placeholder="Ex: acompte en espèces"></div>' +
+    '<button class="btn btn-gold" id="btnAddAcompte">Ajouter un acompte</button>' +
+    '<div id="acompteResult" class="muted"></div>' +
+  '</div>';
+
   if(lockedMonth){
     html += '<div class="banner">Attention : ce mois a été validé et signé par '+lockedMonth.prenom+' le '+new Date(lockedMonth.validatedAt).toLocaleDateString('fr-FR')+'. Toute correction restera tracée dans l\'historique.</div>';
   }
@@ -1145,6 +1175,42 @@ async function renderAdminWorkerDetail(){
     var v = parseInt(this.value, 10);
     w.numeroCueilleur = (v>=1 && v<=56) ? v : null;
     await saveWorkers(workers);
+  });
+
+  document.getElementById('acompteMonthPick').addEventListener('change', function(){
+    state.acompteMonth = this.value;
+    renderAdminWorkerDetail();
+  });
+
+  document.getElementById('btnAddAcompte').onclick = async function(){
+    var montant = parseFloat(document.getElementById('acompteMontant').value);
+    var resultEl = document.getElementById('acompteResult');
+    if(!montant || montant<=0){ alert('Renseigne un montant valide.'); return; }
+    var acompte = {
+      date: document.getElementById('acompteDate').value || todayISO(),
+      montant: montant,
+      notes: document.getElementById('acompteNotes').value,
+      creeLe: new Date().toISOString()
+    };
+    var current = await getAcomptes();
+    if(!current[w.id]) current[w.id] = [];
+    current[w.id].push(acompte);
+    var ok = await saveAcomptes(current);
+    if(!ok){ resultEl.textContent = 'Erreur lors de l\'enregistrement.'; return; }
+    renderAdminWorkerDetail();
+  };
+
+  document.querySelectorAll('button[data-delacompte]').forEach(function(btn){
+    btn.onclick = async function(){
+      if(!confirm('Supprimer cet acompte ?')) return;
+      var idx = parseInt(btn.getAttribute('data-delacompte'),10);
+      var current = await getAcomptes();
+      if(!current[w.id]) return;
+      current[w.id].splice(idx,1);
+      var ok = await saveAcomptes(current);
+      if(!ok){ alert('Erreur lors de la suppression.'); return; }
+      renderAdminWorkerDetail();
+    };
   });
 
   document.getElementById('btnBackAdmin').onclick = function(){
@@ -1319,9 +1385,10 @@ async function renderAdminPayroll(){
 
   var docsAll = await Promise.all(workers.map(function(w){ return getDocuments(w.id); }));
   var entriesAll = await Promise.all(workers.map(function(w){ return getEntries(w.id); }));
+  var acomptesAll = await getAcomptes();
 
   var rows = [];
-  var totalNet = 0, totalCot = 0;
+  var totalNet = 0, totalCot = 0, totalAcomptes = 0;
   for(var i=0;i<workers.length;i++){
     var w = workers[i];
     var docs = docsAll[i];
@@ -1331,33 +1398,40 @@ async function renderAdminPayroll(){
 
     var entries = entriesAll[i];
     var heuresMois = null;
+    var ym = null;
     if(latest && latest.periodLabel){
       var parts = latest.periodLabel.split('-');
       var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
       var mi = moisNoms.indexOf(parts[0]);
       if(mi !== -1){
-        var ym = parts[1] + '-' + String(mi+1).padStart(2,'0');
+        ym = parts[1] + '-' + String(mi+1).padStart(2,'0');
         heuresMois = 0;
         Object.keys(entries).forEach(function(d){ if(d.slice(0,7)===ym){ var t=computeTotal(entries[d]); if(t) heuresMois += t; } });
         heuresMois = round2(heuresMois);
       }
     }
+    if(!ym) ym = todayISO().slice(0,7);
+
+    var acomptesW = (acomptesAll[w.id]||[]).filter(function(a){ return (a.date||'').slice(0,7)===ym; });
+    var totalAcompteW = round2(acomptesW.reduce(function(s,a){ return s+(parseFloat(a.montant)||0); }, 0));
 
     if(latest){ totalNet += latest.netAPayer||0; totalCot += latest.cotisations||0; }
-    rows.push({ prenom: w.prenom, doc: latest, heuresMois: heuresMois });
+    totalAcomptes = round2(totalAcomptes + totalAcompteW);
+    rows.push({ prenom: w.prenom, doc: latest, heuresMois: heuresMois, acompte: totalAcompteW });
   }
   totalNet = round2(totalNet); totalCot = round2(totalCot);
 
-  var html = '<p class="muted" style="margin-bottom:14px;">Montants extraits automatiquement des derniers bulletins importés pour chaque salarié — à vérifier avant tout virement, l\'extraction peut se tromper selon la mise en page du bulletin.</p>';
+  var html = '<p class="muted" style="margin-bottom:14px;">Montants extraits automatiquement des derniers bulletins importés pour chaque salarié — à vérifier avant tout virement, l\'extraction peut se tromper selon la mise en page du bulletin. Les acomptes déjà versés dans le mois sont déduits du reste à virer.</p>';
   html += '<div class="card">';
   rows.forEach(function(r){
     if(!r.doc){
-      html += '<div class="worker-row"><span class="worker-name">'+r.prenom+'</span><span class="muted">aucun bulletin importé</span></div>';
+      html += '<div class="worker-row"><span class="worker-name">'+r.prenom+(r.acompte?' <span class="muted" style="font-size:12px;">(acompte '+r.acompte+' €)</span>':'')+'</span><span class="muted">aucun bulletin importé</span></div>';
     } else {
+      var resteAVirer = round2((r.doc.netAPayer||0) - r.acompte);
       html += '<div class="worker-row" style="align-items:flex-start;">' +
-        '<span class="worker-name">'+r.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+(r.doc.periodLabel||'')+(r.heuresMois!==null?' — '+r.heuresMois+' h (app)':'')+(r.doc.heuresBulletin?' / '+r.doc.heuresBulletin+' h (bulletin)':'')+'</span></span>' +
+        '<span class="worker-name">'+r.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">'+(r.doc.periodLabel||'')+(r.heuresMois!==null?' — '+r.heuresMois+' h (app)':'')+(r.doc.heuresBulletin?' / '+r.doc.heuresBulletin+' h (bulletin)':'')+(r.acompte?' — acompte '+r.acompte+' €':'')+'</span></span>' +
         '<span style="text-align:right;">' +
-          '<span class="worker-hours" style="display:block;">'+(r.doc.netAPayer!==null?r.doc.netAPayer+' €':'—')+'</span>' +
+          '<span class="worker-hours" style="display:block;">'+(r.doc.netAPayer!==null?resteAVirer+' €':'—')+'</span>' +
           '<span class="muted" style="font-size:12px;">cotis. '+(r.doc.cotisations!==null?r.doc.cotisations+' €':'—')+'</span>' +
         '</span>' +
       '</div>';
@@ -1366,7 +1440,9 @@ async function renderAdminPayroll(){
   html += '</div>';
 
   html += '<div class="card">' +
-    '<div class="worker-row"><span class="worker-name">Total à virer</span><span class="worker-hours">'+totalNet+' €</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Total net (bulletins)</span><span class="worker-hours">'+totalNet+' €</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Total acomptes déjà versés</span><span class="worker-hours">−'+totalAcomptes+' €</span></div>' +
+    '<div class="worker-row"><span class="worker-name">Total restant à virer</span><span class="worker-hours">'+round2(totalNet-totalAcomptes)+' €</span></div>' +
     '<div class="worker-row"><span class="worker-name">Total cotisations (MSA et autres)</span><span class="worker-hours">'+totalCot+' €</span></div>' +
   '</div>';
 
@@ -1378,12 +1454,13 @@ async function renderAdminPayroll(){
   document.getElementById('btnBackPayroll').onclick = function(){ state.screen='adminMenu'; render(); };
   document.getElementById('btnExportPayroll').onclick = function(){
     var wb = XLSX.utils.book_new();
-    var data = [['Prénom','Période','Heures (app)','Heures (bulletin)','Net à virer (€)','Cotisations (€)']];
+    var data = [['Prénom','Période','Heures (app)','Heures (bulletin)','Net (bulletin) (€)','Acompte versé (€)','Reste à virer (€)','Cotisations (€)']];
     rows.forEach(function(r){
-      data.push([r.prenom, r.doc?r.doc.periodLabel||'':'', r.heuresMois!==null?r.heuresMois:'', r.doc?r.doc.heuresBulletin||'':'', r.doc?r.doc.netAPayer||'':'', r.doc?r.doc.cotisations||'':'']);
+      var reste = r.doc && r.doc.netAPayer!==null ? round2((r.doc.netAPayer||0)-r.acompte) : '';
+      data.push([r.prenom, r.doc?r.doc.periodLabel||'':'', r.heuresMois!==null?r.heuresMois:'', r.doc?r.doc.heuresBulletin||'':'', r.doc?r.doc.netAPayer||'':'', r.acompte||'', reste, r.doc?r.doc.cotisations||'':'']);
     });
     data.push([]);
-    data.push(['TOTAL','','','', totalNet, totalCot]);
+    data.push(['TOTAL','','','', totalNet, totalAcomptes, round2(totalNet-totalAcomptes), totalCot]);
     var ws = XLSX.utils.aoa_to_sheet(data);
     XLSX.utils.book_append_sheet(wb, ws, 'Virements');
     XLSX.writeFile(wb, 'Virements_'+todayISO()+'.xlsx');
@@ -3633,7 +3710,7 @@ function exportExcel(allData, mods){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives' }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null }; render(); };
 
 render();
 })();
