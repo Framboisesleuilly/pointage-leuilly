@@ -355,6 +355,7 @@ function render(){
   if(state.screen==='adminStockEngrais') return renderAdminStockEngrais();
   if(state.screen==='adminTaches') return renderAdminTaches();
   if(state.screen==='adminDash') return renderAdminDash();
+  if(state.screen==='adminDashOutils') return renderAdminDashOutils();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
   if(state.screen==='adminBulkImport') return renderAdminBulkImport();
   if(state.screen==='adminPayroll') return renderAdminPayroll();
@@ -891,23 +892,19 @@ async function renderAdminDash(){
   var monthFilter = state.adminMonthFilter || todayISO().slice(0,7);
 
   var entriesAll = await Promise.all(workers.map(function(w){ return getEntries(w.id); }));
-  var docsAll = await Promise.all(workers.map(function(w){ return getDocuments(w.id); }));
 
   var totalsHtml = '';
   var allData = [];
   var mods = [];
   var allMonthsSet = {};
-  var docStatusHtml = '';
   var totalHeuresFiltrees = 0;
   var moisNomsFilter = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 
   for(var i=0;i<workers.length;i++){
     var w = workers[i];
     var entries = entriesAll[i];
-    var wdocs = docsAll[i];
     var totalH = 0;
     var totalHFiltered = 0;
-    var monthsWorked = {};
     var days = Object.keys(entries);
     days.forEach(function(d){
       var entry = entries[d];
@@ -916,7 +913,6 @@ async function renderAdminDash(){
         totalH += t;
         var ym = d.slice(0,7);
         allMonthsSet[ym] = true;
-        monthsWorked[ym] = true;
         if(monthFilter==='all' || ym===monthFilter) totalHFiltered += t;
       }
       if(entry.history && entry.history.length){
@@ -930,28 +926,9 @@ async function renderAdminDash(){
     if(monthFilter==='all' || totalHFiltered>0){
       totalsHtml += '<div class="worker-row" data-wid="'+w.id+'" style="cursor:pointer;"><span class="worker-name">'+w.prenom+'<br><span class="muted" style="font-weight:400;font-size:12px;">né(e) le '+frDate(w.dob)+'</span></span><span class="worker-hours">'+round2(totalHFiltered)+' h ›</span></div>';
     }
-
-    var monthKeys = Object.keys(monthsWorked).sort();
-    var docMonthLabels = {};
-    wdocs.forEach(function(doc){ if(doc.periodLabel) docMonthLabels[doc.periodLabel] = true; });
-
-    docStatusHtml += '<div class="worker-row" style="align-items:flex-start;"><span class="worker-name">'+w.prenom+'</span>';
-    if(!monthKeys.length){
-      docStatusHtml += '<span class="muted">aucune heure saisie</span></div>';
-    } else {
-      docStatusHtml += '<span style="text-align:right;">';
-      monthKeys.forEach(function(ym){
-        var parts = ym.split('-');
-        var label = moisNomsFilter[parseInt(parts[1],10)-1].normalize('NFD').replace(/[\u0300-\u036f]/g,'') + '-' + parts[0];
-        var displayLabel = moisNomsFilter[parseInt(parts[1],10)-1] + ' ' + parts[0];
-        var has = !!docMonthLabels[label];
-        docStatusHtml += '<span style="display:block;font-size:13px;color:'+(has?'var(--moss)':'var(--red)')+';">'+(has?'✓':'✗')+' '+displayLabel+'</span>';
-      });
-      docStatusHtml += '</span></div>';
-    }
   }
 
-  if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; docStatusHtml = '<p class="muted">Aucun salarié pour l\'instant.</p>'; }
+  if(!workers.length){ totalsHtml = '<p class="muted">Aucun salarié n\'a encore de compte.</p>'; }
   else if(!totalsHtml){ totalsHtml = '<p class="muted">Aucun salarié n\'a d\'heures saisies pour ce mois.</p>'; }
 
   var allMonthsList = Object.keys(allMonthsSet).sort().reverse();
@@ -963,15 +940,6 @@ async function renderAdminDash(){
       var label = moisNomsFilter[parseInt(parts[1],10)-1] + ' ' + parts[0];
       return '<option value="'+ym+'"'+(monthFilter===ym?' selected':'')+'>'+label+'</option>';
     }).join('');
-
-  mods.sort(function(a,b){ return (b.quand||'').localeCompare(a.quand||''); });
-  var modsHtml = '';
-  if(mods.length){
-    mods.forEach(function(m){
-      var quandStr = m.quand ? new Date(m.quand).toLocaleString('fr-FR') : '—';
-      modsHtml += '<div class="hist-item"><span class="hist-date">'+m.prenom+' — '+frDate(m.jour)+'</span><span class="muted" style="font-size:12px;">'+(m.ancienTotal!==null?m.ancienTotal+'h':'—')+' → '+(m.nouveauTotal!==null?m.nouveauTotal+'h':'—')+'<br>'+quandStr+'</span></div>';
-    });
-  } else { modsHtml = '<p class="muted">Aucune modification enregistrée.</p>'; }
 
   var monthFilterLabel = 'Toutes les périodes';
   if(monthFilter !== 'all'){
@@ -993,21 +961,22 @@ async function renderAdminDash(){
       totalsHtml +
     '</div>' +
     '<button class="btn btn-gold" id="btnExport">Exporter en Excel</button>' +
-    '<div class="section-title">Suivi des documents</div>' +
-    '<div class="card">' + docStatusHtml + '</div>' +
-    '<div class="link-row" id="btnResetInfo">Les identifiants sont : prénom + date de naissance donnés en début de saison.</div>' +
-    '<div class="section-title">Journal des modifications</div>' +
-    '<div class="card">' + modsHtml + '</div>';
+    '<button class="btn btn-ghost" id="btnDashOutils">Suivi des documents & journal des modifications</button>' +
+    '<div class="link-row" id="btnResetInfo">Les identifiants sont : prénom + date de naissance donnés en début de saison.</div>';
 
   document.getElementById('btnBackMenu').onclick = function(){ state.screen='adminMenu'; render(); };
+  document.getElementById('btnDashOutils').onclick = function(){ state.screen='adminDashOutils'; render(); };
 
   document.getElementById('monthFilterSelect').addEventListener('change', function(){
     state.adminMonthFilter = this.value;
     renderAdminDash();
   });
 
-  document.getElementById('btnExport').onclick = function(){
-    exportExcel(allData, mods);
+  document.getElementById('btnExport').onclick = async function(){
+    var btn = this;
+    btn.textContent = 'Préparation…';
+    await exportExcel(allData, mods, monthFilter);
+    btn.textContent = 'Exporter en Excel';
   };
 
   document.querySelectorAll('.worker-row[data-wid]').forEach(function(row){
@@ -1018,6 +987,73 @@ async function renderAdminDash(){
       render();
     });
   });
+}
+
+async function renderAdminDashOutils(){
+  headerTitle.textContent = 'Suivi & journal';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+  var docsAll = await Promise.all(workers.map(function(w){ return getDocuments(w.id); }));
+  var entriesAll = await Promise.all(workers.map(function(w){ return getEntries(w.id); }));
+
+  var moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  var docStatusHtml = '';
+  var mods = [];
+
+  for(var i=0;i<workers.length;i++){
+    var w = workers[i];
+    var entries = entriesAll[i];
+    var wdocs = docsAll[i];
+    var monthsWorked = {};
+    Object.keys(entries).forEach(function(d){
+      var entry = entries[d];
+      var t = computeTotal(entry);
+      if(t) monthsWorked[d.slice(0,7)] = true;
+      if(entry.history && entry.history.length){
+        entry.history.forEach(function(h){
+          mods.push({ prenom: w.prenom, jour: d, ancienTotal: h.total, nouveauTotal: computeTotal(entry), quand: h.remplaceLe });
+        });
+      }
+    });
+    var monthKeys = Object.keys(monthsWorked).sort();
+    var docMonthLabels = {};
+    wdocs.forEach(function(doc){ if(doc.periodLabel) docMonthLabels[doc.periodLabel] = true; });
+
+    docStatusHtml += '<div class="worker-row" style="align-items:flex-start;"><span class="worker-name">'+w.prenom+'</span>';
+    if(!monthKeys.length){
+      docStatusHtml += '<span class="muted">aucune heure saisie</span></div>';
+    } else {
+      docStatusHtml += '<span style="text-align:right;">';
+      monthKeys.forEach(function(ym){
+        var parts = ym.split('-');
+        var label = moisNoms[parseInt(parts[1],10)-1].normalize('NFD').replace(/[\u0300-\u036f]/g,'') + '-' + parts[0];
+        var displayLabel = moisNoms[parseInt(parts[1],10)-1] + ' ' + parts[0];
+        var has = !!docMonthLabels[label];
+        docStatusHtml += '<span style="display:block;font-size:13px;color:'+(has?'var(--moss)':'var(--red)')+';">'+(has?'✓':'✗')+' '+displayLabel+'</span>';
+      });
+      docStatusHtml += '</span></div>';
+    }
+  }
+  if(!workers.length) docStatusHtml = '<p class="muted">Aucun salarié pour l\'instant.</p>';
+
+  mods.sort(function(a,b){ return (b.quand||'').localeCompare(a.quand||''); });
+  var modsHtml = '';
+  if(mods.length){
+    mods.slice(0,150).forEach(function(m){
+      var quandStr = m.quand ? new Date(m.quand).toLocaleString('fr-FR') : '—';
+      modsHtml += '<div class="hist-item"><span class="hist-date">'+m.prenom+' — '+frDate(m.jour)+'</span><span class="muted" style="font-size:12px;">'+(m.ancienTotal!==null?m.ancienTotal+'h':'—')+' → '+(m.nouveauTotal!==null?m.nouveauTotal+'h':'—')+'<br>'+quandStr+'</span></div>';
+    });
+  } else { modsHtml = '<p class="muted">Aucune modification enregistrée.</p>'; }
+
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackDashOutils">‹ Retour à Heures & export</button>' +
+    '<div class="section-title" style="margin-top:14px;">Suivi des documents</div>' +
+    '<div class="card">' + docStatusHtml + '</div>' +
+    '<div class="section-title">Journal des modifications</div>' +
+    '<div class="card">' + modsHtml + '</div>';
+
+  document.getElementById('btnBackDashOutils').onclick = function(){ state.screen='adminDash'; render(); };
 }
 
 async function renderAdminWorkerDetail(){
@@ -3656,21 +3692,43 @@ async function renderAdminPrimes(){
   };
 }
 
-function exportExcel(allData, mods){
+async function exportExcel(allData, mods, monthFilter){
   var wb = XLSX.utils.book_new();
-  var recap = [['Prénom','Date de naissance','Total heures','Nombre de jours travaillés','Dont heures sup 125%','Dont heures sup 150%']];
+  var workers = allData.map(function(d){ return d.worker; });
+  var primeMonth = (monthFilter && monthFilter!=='all') ? monthFilter : todayISO().slice(0,7);
+  var primes = await computeAllWorkersMonthlyPrimes(workers, primeMonth);
+  var acomptesAll = await getAcomptes();
+
+  var moisNomsExp = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  var moisLabelPrime = moisNomsExp[parseInt(primeMonth.split('-')[1],10)-1] + ' ' + primeMonth.split('-')[0];
+  var recapLabel = (monthFilter && monthFilter!=='all') ? (moisNomsExp[parseInt(monthFilter.split('-')[1],10)-1]+' '+monthFilter.split('-')[0]) : 'toutes périodes';
+
+  var recap = [['Prénom','Date de naissance','Heures ('+recapLabel+')','Jours travaillés','Heures sup 125%','Heures sup 150%','Prime '+moisLabelPrime+' (€)','Acomptes '+moisLabelPrime+' (€)']];
   var overtimeRows = [['Prénom','Semaine','Début de semaine','Total heures','Heures normales (≤35h)','Heures sup 125% (35-43h)','Heures sup 150% (>43h)']];
   var monthlyRows = [['Prénom','Mois','Total heures','Nombre de jours travaillés']];
+
   allData.forEach(function(d){
-    var weeks = computeOvertimeWeeks(d.entries);
-    var totalSup25 = 0, totalSup50 = 0;
-    weeks.forEach(function(w){
-      totalSup25 += w.sup25;
-      totalSup50 += w.sup50;
+    var entriesForRecap = d.entries;
+    if(monthFilter && monthFilter!=='all'){
+      entriesForRecap = {};
+      Object.keys(d.entries).forEach(function(day){ if(day.slice(0,7)===monthFilter) entriesForRecap[day] = d.entries[day]; });
+    }
+    var weeksRecap = computeOvertimeWeeks(entriesForRecap);
+    var totalSup25 = 0, totalSup50 = 0, totalHRecap = 0;
+    weeksRecap.forEach(function(w){ totalSup25 += w.sup25; totalSup50 += w.sup50; });
+    Object.keys(entriesForRecap).forEach(function(day){ var t=computeTotal(entriesForRecap[day]); if(t) totalHRecap+=t; });
+    var totalJours = Object.keys(entriesForRecap).filter(function(day){ return computeTotal(entriesForRecap[day]); }).length;
+
+    var primeW = primes[d.worker.id] ? primes[d.worker.id].total : 0;
+    var acomptesW = (acomptesAll[d.worker.id]||[]).filter(function(a){ return (a.date||'').slice(0,7)===primeMonth; });
+    var totalAcompteW = round2(acomptesW.reduce(function(s,a){ return s+(parseFloat(a.montant)||0); }, 0));
+
+    recap.push([d.worker.prenom, d.worker.dob, round2(totalHRecap), totalJours, round2(totalSup25), round2(totalSup50), primeW, totalAcompteW]);
+
+    var weeksFull = computeOvertimeWeeks(d.entries);
+    weeksFull.forEach(function(w){
       overtimeRows.push([d.worker.prenom, w.semaine, frDate(w.debutSemaine), w.total, w.normales, w.sup25, w.sup50]);
     });
-    var totalJours = Object.keys(d.entries).filter(function(day){ return computeTotal(d.entries[day]); }).length;
-    recap.push([d.worker.prenom, d.worker.dob, d.totalH, totalJours, round2(totalSup25), round2(totalSup50)]);
 
     var months = computeMonthlyRecap(d.entries);
     months.forEach(function(m){
