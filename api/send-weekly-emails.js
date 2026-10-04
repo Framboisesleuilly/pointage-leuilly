@@ -57,6 +57,8 @@ export default async function handler(req, res) {
     });
     total = Math.round(total*100)/100;
 
+    if (total === 0) { results.push({ prenom: w.prenom, statut: 'ignoré (aucune heure cette semaine)' }); continue; }
+
     const html = `
       <div style="font-family:sans-serif;color:#2B2B24;">
         <h2 style="color:#33502E;">Bonjour ${w.prenom},</h2>

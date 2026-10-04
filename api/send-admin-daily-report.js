@@ -99,6 +99,11 @@ export default async function handler(req, res) {
   }
   totalDuJour = Math.round(totalDuJour*100)/100;
 
+  // Pas d'activité du tout aujourd'hui : on n'envoie pas le récap automatique (sauf déclenchement manuel volontaire).
+  if (!forceBackup && ontRempli.length === 0) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'aucune activité aujourd\'hui', totalDuJour: 0, ontRempli: 0, pasRempli: pasRempli.length });
+  }
+
   const rowsOk = ontRempli.map(function(o){ return `<tr><td style="padding:4px 10px;">${o.prenom}</td><td style="padding:4px 10px;text-align:right;">${o.total} h</td></tr>`; }).join('');
   const rowsMissing = pasRempli.map(function(p){ return `<li>${p}</li>`; }).join('');
 
