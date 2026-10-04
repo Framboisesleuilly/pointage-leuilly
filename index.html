@@ -837,10 +837,37 @@ function renderAdminLogin(){
   };
 }
 
-function renderAdminMenu(){
+async function renderAdminMenu(){
   headerTitle.textContent = 'Espace responsable';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+
+  var workers = await getWorkers();
+  var today = todayISO();
+  var entriesAll = await Promise.all(workers.map(function(w){ return getEntries(w.id); }));
+  var heuresJour = 0, pasRemplis = 0;
+  entriesAll.forEach(function(entries){
+    var t = entries[today] ? computeTotal(entries[today]) : null;
+    if(t) heuresJour += t; else pasRemplis++;
+  });
+  heuresJour = round2(heuresJour);
+
+  var barqToday = await getBarquettes(today);
+  var kgJour = round2(barqToday.reduce(function(s,e){ return s + (parseFloat(e.barquettes)||0)*0.125; }, 0));
+
+  var bons = await getBonsApport();
+  var moisActuel = today.slice(0,7);
+  var kgVenteMois = round2(bons.filter(function(b){ return normalizeDateStr(b.date).slice(0,7)===moisActuel; }).reduce(function(s,b){ return s + (parseFloat(b.kg)||0); }, 0));
+
+  var resumeHtml = '<div class="section-title" style="margin-top:0;">Aujourd\'hui</div><div class="card">' +
+    '<div class="worker-row"><span class="muted">Heures pointées</span><span class="worker-hours">'+heuresJour+' h</span></div>' +
+    '<div class="worker-row"><span class="muted">Kg triés</span><span class="worker-hours">'+kgJour+' kg</span></div>' +
+    '<div class="worker-row"><span class="muted">Salarié(s) n\'ayant pas encore pointé</span><span class="worker-hours">'+pasRemplis+'</span></div>' +
+    '<div class="worker-row"><span class="muted">Ventes ce mois-ci</span><span class="worker-hours">'+kgVenteMois+' kg</span></div>' +
+  '</div>';
+
   app.innerHTML =
-    '<div class="section-title" style="margin-top:0;">Personnel & heures</div>' +
+    resumeHtml +
+    '<div class="section-title">Personnel & heures</div>' +
     '<button class="home-btn" id="mnuHeures"><div class="t">Heures & export</div><div class="s">Total par salarié, export Excel, suivi des documents</div></button>' +
     '<button class="home-btn" id="mnuNewWorker"><div class="t">Créer un salarié</div><div class="s">Ajouter un compte directement</div></button>' +
     '<button class="home-btn" id="mnuImportHours"><div class="t">Importer une feuille d\'heures</div><div class="s">Depuis un fichier Excel ou une photo</div></button>' +
