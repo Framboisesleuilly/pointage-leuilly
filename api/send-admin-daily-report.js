@@ -61,8 +61,57 @@ async function buildBackupWorkbook(workers){
   return XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
 }
 
+async function handleSignatures(req, res, RESEND_API_KEY, FROM_EMAIL, ADMIN_EMAIL) {
+  const manual = req.query && req.query.manual === '1';
+  const workers = (await kv.get('workers')) || [];
+  const attachments = [];
+  const marks = [];
+  const enAttente = [];
+  const faits = [];
+  let totalSize = 0;
+  for (const w of workers) {
+    const docs = (await kv.get('documents:' + w.id)) || [];
+    const aSig = docs.filter(function(d){ return d.aSigner; });
+    if (!aSig.length) continue;
+    const pending = aSig.filter(function(d){ return d.statut !== 'signe'; });
+    if (pending.length) enAttente.push({ prenom: w.prenom, docs: pending.map(function(d){ return d.kind === 'reglement' ? 'Règlement intérieur' : (d.kind === 'fincontrat' ? 'Fin de contrat' : 'Contrat/DPAE'); }) });
+    let changed = false;
+    for (const d of aSig) {
+      if ((manual || !pending.length) && d.statut === 'signe' && !d.envoyeLe && totalSize + (d.data||'').length < 30 * 1024 * 1024) {
+        attachments.push({ filename: d.name, content: d.data });
+        totalSize += (d.data||'').length;
+        faits.push(w.prenom + ' — ' + (d.kind === 'reglement' ? 'Règlement intérieur' : (d.kind === 'fincontrat' ? 'Fin de contrat' : 'Contrat/DPAE')));
+        d.envoyeLe = new Date().toISOString();
+        changed = true;
+      }
+    }
+    if (changed) marks.push({ id: w.id, docs: docs });
+  }
+  if (!manual && !attachments.length) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'rien de nouveau', enAttente: enAttente.length });
+  }
+  const html = `
+    <div style="font-family:sans-serif;color:#2B2B24;">
+      <h2 style="color:#33502E;">Signatures des salariés</h2>
+      <h3 style="color:#33502E;">Documents signés joints (${attachments.length})</h3>
+      <ul>${faits.map(function(f){ return '<li>' + f + '</li>'; }).join('') || '<li>Aucun nouveau document signé</li>'}</ul>
+      <h3 style="color:#A32638;">Reste à faire (${enAttente.length} salarié(s))</h3>
+      <ul>${enAttente.map(function(e){ return '<li>' + e.prenom + ' : ' + e.docs.join(', ') + '</li>'; }).join('') || '<li>Tout est signé 🎉</li>'}</ul>
+    </div>`;
+  const payload = { from: FROM_EMAIL, to: ADMIN_EMAIL, subject: `Signatures : ${attachments.length} document(s) signé(s), ${enAttente.length} salarié(s) à relancer`, html: html };
+  if (attachments.length) payload.attachments = attachments;
+  try {
+    const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (r.ok) { for (const m of marks) { await kv.set('documents:' + m.id, m.docs); } }
+    return res.status(200).json({ ok: true, envoye: r.ok, joints: attachments.length, enAttente: enAttente.length });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
 export default async function handler(req, res) {
-  if (process.env.CRON_SECRET) {
+  const isSig = req.query && req.query.mode === 'signatures';
+  if (!isSig && process.env.CRON_SECRET) {
     const auth = req.headers['authorization'];
     if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
       return res.status(401).json({ error: 'Non autorisé' });
@@ -75,6 +124,8 @@ export default async function handler(req, res) {
   if (!RESEND_API_KEY) {
     return res.status(500).json({ error: 'RESEND_API_KEY manquant dans les variables d\'environnement' });
   }
+
+  if (isSig) return await handleSignatures(req, res, RESEND_API_KEY, FROM_EMAIL, ADMIN_EMAIL);
 
   const workers = (await kv.get('workers')) || [];
   const today = new Date().toISOString().slice(0,10);
