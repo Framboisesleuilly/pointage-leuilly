@@ -130,6 +130,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chart.js/4.4.4/chart.umd.min.js"></script>
 <script>
@@ -142,6 +143,8 @@ var btnMenu = document.getElementById('btnMenu');
 var navMenu = document.getElementById('navMenu');
 var ADMIN_CODE = "LEUILLY2026";
 
+// Signature côté salarié : désactivée pour l'instant (pas d'envoi en cours de saison). Passer à true pour l'activer.
+var WORKER_SIGN_ENABLED = false;
 var WORKER_SCREENS = ['workerDash','workerRapport','workerDocs','workerParams','sorterEntry'];
 
 async function getDocuments(workerId){
@@ -184,6 +187,10 @@ async function getSecteurs(){ return getAgroData('secteurs', []); }
 async function saveSecteurs(list){ return saveAgroData('secteurs', list); }
 async function getAcomptes(){ return getAgroData('acomptes', {}); }
 async function saveAcomptes(data){ return saveAgroData('acomptes', data); }
+async function getAttestationInfos(){ return getAgroData('attestation-infos', {}); }
+async function saveAttestationInfos(data){ return saveAgroData('attestation-infos', data); }
+async function getTamponImage(){ return getAgroData('tampon-image', null); }
+async function saveTamponImage(dataUrl){ return saveAgroData('tampon-image', dataUrl); }
 async function getParcelleLog(date){
   try{ var r = await fetch('/api/parcelle?date='+date); return r.ok ? await r.json() : []; }catch(err){ return []; }
 }
@@ -286,7 +293,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null, attestationWorkerId:null, signDocId:null };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -358,6 +365,9 @@ function render(){
   if(state.screen==='adminDashOutils') return renderAdminDashOutils();
   if(state.screen==='adminWorkerDetail') return renderAdminWorkerDetail();
   if(state.screen==='adminBulkImport') return renderAdminBulkImport();
+  if(state.screen==='adminAttestation') return renderAdminAttestation();
+  if(state.screen==='adminContrats') return renderAdminContrats();
+  if(state.screen==='workerSign') return renderWorkerSign();
   if(state.screen==='adminPayroll') return renderAdminPayroll();
   if(state.screen==='adminBarquettes') return renderAdminBarquettes();
   if(state.screen==='adminRythme') return renderAdminRythme();
@@ -497,6 +507,11 @@ async function renderWorkerDash(){
   }
 
   app.innerHTML = html;
+  getDocuments(state.worker.id).then(function(ds){
+    var n = ds.filter(function(d){ return d.aSigner && d.statut !== 'signe'; }).length;
+    if(WORKER_SIGN_ENABLED && n && state.screen==='workerDash') app.insertAdjacentHTML('afterbegin', '<div class="banner" style="cursor:pointer;" id="bannerSign">✍️ '+n+' document(s) à signer — touchez ici (contrat, règlement intérieur).</div>');
+    var b = document.getElementById('bannerSign'); if(b) b.onclick = function(){ state.screen='workerDocs'; render(); };
+  });
 
   document.getElementById('freeDatePick').addEventListener('change', function(){
     state.editDate = (this.value === today) ? null : this.value;
@@ -673,6 +688,7 @@ async function renderWorkerDocs(){
   headerTitle.textContent = 'Documents';
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var docs = await getDocuments(state.worker.id);
+  if(!WORKER_SIGN_ENABLED) docs = docs.filter(function(d){ return !d.aSigner; });
   docs = docs.slice().sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); });
 
   var html = '';
@@ -682,12 +698,19 @@ async function renderWorkerDocs(){
     html += '<div class="card">';
     docs.forEach(function(d, idx){
       var dateStr = d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString('fr-FR') : '';
-      html += '<div class="doc-item"><span>'+d.name+'<br><span class="muted">'+dateStr+'</span></span><button class="btn btn-ghost" style="width:auto;padding:8px 14px;" data-dlidx="'+idx+'">Télécharger</button></div>';
+      var signBtn = '';
+      if(d.aSigner){
+        signBtn = d.statut==='signe' ? '<span style="color:var(--moss);font-size:13px;margin-right:8px;">✓ signé</span>' : '<button class="btn btn-gold" style="width:auto;padding:8px 14px;margin-right:6px;" data-signid="'+d.id+'">Lire et signer</button>';
+      }
+      html += '<div class="doc-item"><span>'+d.name+'<br><span class="muted">'+dateStr+(d.aSigner&&d.statut!=='signe'?' — <strong style="color:var(--red);">à signer</strong>':'')+'</span></span><span style="display:flex;align-items:center;">'+signBtn+'<button class="btn btn-ghost" style="width:auto;padding:8px 14px;" data-dlidx="'+idx+'">Télécharger</button></span></div>';
     });
     html += '</div>';
   }
   app.innerHTML = html;
 
+  document.querySelectorAll('button[data-signid]').forEach(function(btn){
+    btn.onclick = function(){ state.signDocId = btn.getAttribute('data-signid'); state.screen='workerSign'; render(); };
+  });
   document.querySelectorAll('button[data-dlidx]').forEach(function(btn){
     btn.onclick = function(){
       var idx = parseInt(btn.getAttribute('data-dlidx'),10);
@@ -1358,9 +1381,30 @@ async function renderAdminBulkImport(){
       '<div><label>Sélectionner les fichiers (plusieurs à la fois)</label><input type="file" id="bulkFiles" multiple></div>' +
       '<p class="muted">Astuce : nomme les fichiers avec le prénom du salarié (ex: Bulletin_Marie_Juillet.pdf) pour une reconnaissance automatique.</p>' +
     '</div>' +
+    '<div class="card stack">' +
+      '<div class="section-title" style="margin-top:0;">Attestation employeur (France Travail)</div>' +
+      '<p class="muted" style="margin-top:-6px;">Génère un document pré-rempli (identité, dates, salaires) prêt à imprimer. Vous dessinez votre signature à l\'écran et ajoutez le tampon avant impression — gratuit, rien n\'est envoyé ni signé automatiquement.</p>' +
+      '<div><label>Salarié concerné</label><select id="attestWorkerSel"><option value="">— choisir —</option>' +
+        workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('') +
+      '</select></div>' +
+      '<button class="btn btn-gold" id="btnGoAttestation">Préparer l\'attestation</button>' +
+    '</div>' +
+    '<div class="card stack">' +
+      '<div class="section-title" style="margin-top:0;">Contrats & DPAE à signer</div>' +
+      '<p class="muted" style="margin-top:-6px;">Importez les contrats en masse, signez-les en une fois (signature dessinée, datée du jour), ils sont déposés chez chaque salarié pour signature, avec le règlement intérieur.</p>' +
+      '<button class="btn btn-gold" id="btnGoContrats">Ouvrir</button>' +
+    '</div>' +
     '<div id="bulkList"></div>';
 
   document.getElementById('btnBackBulk').onclick = function(){ state.screen='adminMenu'; render(); };
+  document.getElementById('btnGoContrats').onclick = function(){ state.screen='adminContrats'; render(); };
+  document.getElementById('btnGoAttestation').onclick = function(){
+    var wid = document.getElementById('attestWorkerSel').value;
+    if(!wid){ alert('Choisissez un salarié.'); return; }
+    state.attestationWorkerId = wid;
+    state.screen = 'adminAttestation';
+    render();
+  };
 
   document.getElementById('bulkFiles').addEventListener('change', async function(e){
     var files = Array.from(e.target.files);
@@ -1438,6 +1482,570 @@ async function renderAdminBulkImport(){
       resultEl.textContent = count + ' document(s) importé(s)' + (skipped ? ', ' + skipped + ' ignoré(s) (pas de salarié choisi)' : '') + '.';
     };
   });
+}
+
+async function renderAdminAttestation(){
+  headerTitle.textContent = 'Attestation employeur';
+  var wid = state.attestationWorkerId;
+  var workers = await getWorkers();
+  var w = workers.find(function(x){ return x.id === wid; });
+  if(!w){
+    app.innerHTML = '<p class="muted">Salarié introuvable.</p><button class="btn btn-ghost" id="btnBackAtt">‹ Retour</button>';
+    document.getElementById('btnBackAtt').onclick = function(){ state.screen='adminBulkImport'; render(); };
+    return;
+  }
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+
+  var infos = await getAttestationInfos();
+  var info = infos[wid] || {};
+  var employeur = await getAgroData('employeur-info', {});
+  var docs = await getDocuments(wid);
+  var tamponSaved = await getTamponImage();
+
+  var moisNoms = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+  var moisAffiche = {janvier:'Janvier',fevrier:'Février',mars:'Mars',avril:'Avril',mai:'Mai',juin:'Juin',juillet:'Juillet',aout:'Août',septembre:'Septembre',octobre:'Octobre',novembre:'Novembre',decembre:'Décembre'};
+
+  var bulletins = docs.filter(function(d){ return d.periodLabel; });
+  // dédoublonne par période, garde le plus récent importé
+  var byPeriod = {};
+  bulletins.forEach(function(d){
+    if(!byPeriod[d.periodLabel] || (d.uploadedAt||'') > (byPeriod[d.periodLabel].uploadedAt||'')) byPeriod[d.periodLabel] = d;
+  });
+  var periodes = Object.keys(byPeriod).sort(function(a,b){
+    var pa = a.split('-'), pb = b.split('-');
+    var ya = parseInt(pa[1],10)||0, yb = parseInt(pb[1],10)||0;
+    if(ya!==yb) return ya-yb;
+    return (moisNoms.indexOf(pa[0])) - (moisNoms.indexOf(pb[0]));
+  });
+
+  if(!state.attestSalaireLignes){
+    state.attestSalaireLignes = periodes.map(function(p){
+      var d = byPeriod[p];
+      var parts = p.split('-');
+      var label = (moisAffiche[parts[0]]||parts[0]) + ' ' + parts[1];
+      return { label: label, brut: '', net: d.netAPayer!==null&&d.netAPayer!==undefined ? d.netAPayer : '', heures: d.heuresBulletin!==null&&d.heuresBulletin!==undefined ? d.heuresBulletin : '' };
+    });
+  }
+
+  function ligneSalaireHtml(l, i){
+    return '<div class="doc-item" style="align-items:center;gap:6px;">' +
+      '<input data-sligne="label" data-slidx="'+i+'" value="'+(l.label||'')+'" placeholder="Mois" style="flex:1.3;padding:8px;border-radius:8px;border:1px solid var(--line);">' +
+      '<input data-sligne="net" data-slidx="'+i+'" value="'+(l.net||'')+'" placeholder="Net (€)" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--line);">' +
+      '<input data-sligne="heures" data-slidx="'+i+'" value="'+(l.heures||'')+'" placeholder="Heures" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--line);">' +
+      '<button class="btn btn-ghost" data-delsligne="'+i+'" style="padding:8px 10px;">✕</button>' +
+    '</div>';
+  }
+
+  var motifOptions = ['Fin de contrat à durée déterminée (saisonnier)','Fin de mission','Rupture de la période d\'essai','Démission','Autre motif'];
+
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackAtt">‹ Retour à l\'import en masse</button>' +
+    '<p class="muted" style="margin-top:6px;">Document d\'aide à la constitution de l\'attestation employeur pour '+w.prenom+'. Les champs sont pré-remplis à partir des bulletins déjà importés — vérifiez-les avant impression. Vous signerez à l\'écran et apposerez le tampon juste avant d\'imprimer : rien n\'est signé automatiquement.</p>' +
+
+    '<div class="section-title">Employeur</div>' +
+    '<div class="card stack">' +
+      '<div><label>Raison sociale</label><input id="attEmpNom" value="'+(employeur.nom||'SARL Fruits de la Montagne')+'"></div>' +
+      '<div><label>Adresse</label><input id="attEmpAdresse" value="'+(employeur.adresse||'Leuilly-sous-Coucy')+'"></div>' +
+      '<div><label>SIRET</label><input id="attEmpSiret" value="'+(employeur.siret||'')+'"></div>' +
+    '</div>' +
+
+    '<div class="section-title">Salarié</div>' +
+    '<div class="card stack">' +
+      '<div><label>Prénom</label><input value="'+w.prenom+'" disabled></div>' +
+      '<div><label>Nom</label><input id="attNom" value="'+(info.nom||'')+'"></div>' +
+      '<div><label>Date de naissance</label><input type="date" id="attNaissance" value="'+(info.naissance||'')+'"></div>' +
+      '<div><label>Adresse</label><input id="attAdresse" value="'+(info.adresse||'')+'"></div>' +
+      '<div><label>Numéro de sécurité sociale</label><input id="attSecu" value="'+(info.secu||'')+'"></div>' +
+      '<div><label>Emploi occupé</label><input id="attEmploi" value="'+(info.emploi||'Ouvrier agricole saisonnier')+'"></div>' +
+      '<div><label>Date de début de contrat</label><input type="date" id="attDebut" value="'+(info.debut||'')+'"></div>' +
+      '<div><label>Date de fin de contrat (dernier jour travaillé)</label><input type="date" id="attFin" value="'+(info.fin||todayISO())+'"></div>' +
+      '<div><label>Motif de la fin de contrat</label><select id="attMotif">' +
+        motifOptions.map(function(m){ return '<option'+(info.motif===m?' selected':'')+'>'+m+'</option>'; }).join('') +
+      '</select></div>' +
+    '</div>' +
+
+    '<div class="section-title">Historique des rémunérations</div>' +
+    '<div class="card stack" id="attSalaireCard">' +
+      '<div id="attSalaireLignes">' + state.attestSalaireLignes.map(ligneSalaireHtml).join('') + '</div>' +
+      '<button class="btn btn-ghost" id="btnAddSligne">+ Ajouter une ligne</button>' +
+      '<p class="muted" style="margin-top:-4px;">Pré-rempli depuis les bulletins déjà importés dans l\'appli. Complétez les mois manquants à la main si besoin.</p>' +
+    '</div>' +
+
+    '<div class="section-title">Lieu, date et signature</div>' +
+    '<div class="card stack">' +
+      '<div><label>Lieu</label><input id="attLieu" value="'+(employeur.lieu||'Leuilly-sous-Coucy')+'"></div>' +
+      '<div><label>Date</label><input type="date" id="attDate" value="'+todayISO()+'"></div>' +
+      '<div><label>Votre signature (dessinez avec la souris ou le doigt)</label>' +
+        '<canvas id="attSignCanvas" width="500" height="150" style="border:1px solid var(--line);border-radius:8px;width:100%;max-width:500px;touch-action:none;background:#fff;"></canvas>' +
+        '<button class="btn btn-ghost" id="btnClearSign" style="margin-top:6px;">Effacer la signature</button>' +
+      '</div>' +
+      '<div><label>Tampon de l\'exploitation (image, facultatif)</label>' +
+        '<input type="file" id="attTamponFile" accept="image/*">' +
+        '<div id="attTamponPreview" style="margin-top:6px;">' + (tamponSaved ? '<img src="'+tamponSaved+'" style="max-height:80px;">' : '') + '</div>' +
+        '<label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;"><input type="checkbox" id="attTamponSave" checked style="width:auto;"> Mémoriser ce tampon pour la prochaine fois</label>' +
+      '</div>' +
+    '</div>' +
+
+    '<button class="btn btn-gold" id="btnGenAttestation" style="margin-top:10px;">Générer le document à imprimer</button>';
+
+  document.getElementById('btnBackAtt').onclick = function(){ state.attestSalaireLignes = null; state.screen='adminBulkImport'; render(); };
+
+  document.getElementById('btnAddSligne').onclick = function(){
+    state.attestSalaireLignes.push({ label:'', brut:'', net:'', heures:'' });
+    render();
+  };
+  app.querySelectorAll('[data-delsligne]').forEach(function(btn){
+    btn.onclick = function(){
+      state.attestSalaireLignes.splice(parseInt(btn.getAttribute('data-delsligne'),10), 1);
+      render();
+    };
+  });
+  function syncSalaireLignes(){
+    app.querySelectorAll('[data-sligne]').forEach(function(inp){
+      var idx = parseInt(inp.getAttribute('data-slidx'),10);
+      var field = inp.getAttribute('data-sligne');
+      if(state.attestSalaireLignes[idx]) state.attestSalaireLignes[idx][field] = inp.value;
+    });
+  }
+
+  // --- pad de signature ---
+  var canvas = document.getElementById('attSignCanvas');
+  var ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#1a1a1a';
+  var drawing = false, hasSignature = false;
+  function posFromEvent(e){
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  }
+  function startDraw(e){ e.preventDefault(); drawing = true; hasSignature = true; var p = posFromEvent(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function moveDraw(e){ if(!drawing) return; e.preventDefault(); var p = posFromEvent(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+  function endDraw(e){ drawing = false; }
+  canvas.addEventListener('mousedown', startDraw);
+  canvas.addEventListener('mousemove', moveDraw);
+  canvas.addEventListener('mouseup', endDraw);
+  canvas.addEventListener('mouseleave', endDraw);
+  canvas.addEventListener('touchstart', startDraw, { passive: false });
+  canvas.addEventListener('touchmove', moveDraw, { passive: false });
+  canvas.addEventListener('touchend', endDraw);
+  document.getElementById('btnClearSign').onclick = function(){ ctx.clearRect(0,0,canvas.width,canvas.height); hasSignature = false; };
+
+  // --- tampon ---
+  var tamponDataUrl = tamponSaved || null;
+  document.getElementById('attTamponFile').addEventListener('change', function(e){
+    var file = e.target.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      tamponDataUrl = reader.result;
+      document.getElementById('attTamponPreview').innerHTML = '<img src="'+tamponDataUrl+'" style="max-height:80px;">';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('btnGenAttestation').onclick = async function(){
+    syncSalaireLignes();
+    if(!hasSignature && !tamponSaved){
+      if(!confirm('Aucune signature dessinée pour le moment. Générer tout de même le document (vous pourrez signer sur la version imprimée) ?')) return;
+    }
+
+    var empNom = document.getElementById('attEmpNom').value;
+    var empAdresse = document.getElementById('attEmpAdresse').value;
+    var empSiret = document.getElementById('attEmpSiret').value;
+    var nom = document.getElementById('attNom').value;
+    var naissance = document.getElementById('attNaissance').value;
+    var adresse = document.getElementById('attAdresse').value;
+    var secu = document.getElementById('attSecu').value;
+    var emploi = document.getElementById('attEmploi').value;
+    var debut = document.getElementById('attDebut').value;
+    var fin = document.getElementById('attFin').value;
+    var motif = document.getElementById('attMotif').value;
+    var lieu = document.getElementById('attLieu').value;
+    var dateDoc = document.getElementById('attDate').value;
+
+    // sauvegarde pour réutilisation future (hors page fiche salarié)
+    employeur.nom = empNom; employeur.adresse = empAdresse; employeur.siret = empSiret; employeur.lieu = lieu;
+    await saveAgroData('employeur-info', employeur);
+    infos[wid] = { nom: nom, naissance: naissance, adresse: adresse, secu: secu, emploi: emploi, debut: debut, fin: fin, motif: motif };
+    await saveAttestationInfos(infos);
+    if(document.getElementById('attTamponSave').checked && tamponDataUrl){
+      await saveTamponImage(tamponDataUrl);
+    }
+
+    var signatureDataUrl = hasSignature ? canvas.toDataURL('image/png') : '';
+
+    var lignesHtml = state.attestSalaireLignes.filter(function(l){ return l.label; }).map(function(l){
+      return '<tr><td>'+l.label+'</td><td style="text-align:right;">'+(l.net!==''?l.net+' €':'—')+'</td><td style="text-align:right;">'+(l.heures!==''?l.heures+' h':'—')+'</td></tr>';
+    }).join('');
+
+    var docHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Attestation employeur - '+w.prenom+'</title><style>' +
+      'body{font-family:Arial,Helvetica,sans-serif;color:#111;max-width:720px;margin:30px auto;line-height:1.5;font-size:14px;}' +
+      'h1{font-size:18px;text-align:center;margin-bottom:6px;}' +
+      'h2{font-size:13px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #999;padding-bottom:4px;margin-top:26px;}' +
+      'table{width:100%;border-collapse:collapse;margin-top:8px;}' +
+      'td,th{border:1px solid #ccc;padding:6px 8px;font-size:13px;}' +
+      'th{background:#f3f3f3;text-align:left;}' +
+      '.row{display:flex;justify-content:space-between;margin:4px 0;}' +
+      '.sign-zone{display:flex;justify-content:space-between;margin-top:40px;}' +
+      '.sign-box{text-align:center;width:46%;}' +
+      '.sign-box img{max-height:90px;display:block;margin:6px auto;}' +
+      '.sign-line{border-top:1px solid #333;margin-top:60px;padding-top:4px;font-size:12px;}' +
+      '@media print{ body{margin:0;} }' +
+      '</style></head><body>' +
+      '<h1>Attestation employeur</h1>' +
+      '<p style="text-align:center;color:#555;">Document établi par l\'employeur à l\'attention de France Travail</p>' +
+
+      '<h2>Employeur</h2>' +
+      '<div class="row"><span>Raison sociale</span><strong>'+empNom+'</strong></div>' +
+      '<div class="row"><span>Adresse</span><strong>'+empAdresse+'</strong></div>' +
+      (empSiret ? '<div class="row"><span>SIRET</span><strong>'+empSiret+'</strong></div>' : '') +
+
+      '<h2>Salarié</h2>' +
+      '<div class="row"><span>Nom</span><strong>'+(nom||'—')+'</strong></div>' +
+      '<div class="row"><span>Prénom</span><strong>'+w.prenom+'</strong></div>' +
+      (naissance ? '<div class="row"><span>Date de naissance</span><strong>'+frDate(naissance)+'</strong></div>' : '') +
+      (adresse ? '<div class="row"><span>Adresse</span><strong>'+adresse+'</strong></div>' : '') +
+      (secu ? '<div class="row"><span>N° de sécurité sociale</span><strong>'+secu+'</strong></div>' : '') +
+      '<div class="row"><span>Emploi occupé</span><strong>'+emploi+'</strong></div>' +
+      (debut ? '<div class="row"><span>Date de début de contrat</span><strong>'+frDate(debut)+'</strong></div>' : '') +
+      (fin ? '<div class="row"><span>Date de fin de contrat</span><strong>'+frDate(fin)+'</strong></div>' : '') +
+      '<div class="row"><span>Motif de la fin de contrat</span><strong>'+motif+'</strong></div>' +
+
+      '<h2>Historique des rémunérations</h2>' +
+      '<table><tr><th>Période</th><th>Net versé</th><th>Heures</th></tr>' + (lignesHtml || '<tr><td colspan="3">Aucune donnée</td></tr>') + '</table>' +
+
+      '<div class="sign-zone">' +
+        '<div class="sign-box"><div>Fait à '+(lieu||'—')+', le '+(dateDoc?frDate(dateDoc):'—')+'</div></div>' +
+      '</div>' +
+      '<div class="sign-zone">' +
+        '<div class="sign-box">' +
+          (signatureDataUrl ? '<img src="'+signatureDataUrl+'">' : '') +
+          '<div class="sign-line">Signature de l\'employeur</div>' +
+        '</div>' +
+        '<div class="sign-box">' +
+          (tamponDataUrl ? '<img src="'+tamponDataUrl+'">' : '') +
+          '<div class="sign-line">Tampon de l\'exploitation</div>' +
+        '</div>' +
+      '</div>' +
+
+      '</body></html>';
+
+    var w2 = window.open('', '_blank');
+    if(!w2){ alert('Le navigateur a bloqué l\'ouverture de la fenêtre d\'impression. Autorisez les pop-ups pour ce site.'); return; }
+    w2.document.open();
+    w2.document.write(docHtml);
+    w2.document.close();
+    setTimeout(function(){ try{ w2.focus(); w2.print(); }catch(err){} }, 300);
+  };
+}
+
+// ===== Signature de documents PDF (contrats / DPAE / règlement intérieur) =====
+function makeSignaturePad(canvas){
+  var ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1a1a1a';
+  var drawing = false, has = false;
+  function pos(e){
+    var r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * canvas.width / r.width, y: (e.clientY - r.top) * canvas.height / r.height };
+  }
+  canvas.style.touchAction = 'none';
+  canvas.addEventListener('pointerdown', function(e){ e.preventDefault(); drawing = true; has = true; try{ canvas.setPointerCapture(e.pointerId); }catch(err){} var p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x+0.1, p.y+0.1); ctx.stroke(); });
+  canvas.addEventListener('pointermove', function(e){ if(!drawing) return; e.preventDefault(); var p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+  function end(){ drawing = false; }
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  return {
+    isEmpty: function(){ return !has; },
+    clear: function(){ ctx.clearRect(0,0,canvas.width,canvas.height); has = false; },
+    toDataURL: function(){ return canvas.toDataURL('image/png'); }
+  };
+}
+
+function base64ToBytes(b64){
+  var bin = atob(b64); var arr = new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+// Appose une signature (image PNG dessinée) + une ligne de texte sur une page d'un PDF. pos = {x,y} en fraction (0-1) depuis le haut-gauche.
+async function stampPdfBase64(b64, sigDataUrl, pos, lineText, pageNum){
+  var pdfDoc = await PDFLib.PDFDocument.load(base64ToBytes(b64), { ignoreEncryption: true });
+  var pages = pdfDoc.getPages();
+  var idx = (pageNum && pageNum >= 1 && pageNum <= pages.length) ? pageNum - 1 : pages.length - 1;
+  var page = pages[idx];
+  var size = page.getSize();
+  var img = await pdfDoc.embedPng(sigDataUrl);
+  var boxW = size.width * 0.22;
+  var boxH = img.height * (boxW / img.width);
+  var x = Math.max(0, Math.min(size.width - boxW, pos.x * size.width - boxW/2));
+  var y = Math.max(0, Math.min(size.height - boxH, size.height - pos.y * size.height - boxH/2));
+  page.drawImage(img, { x: x, y: y, width: boxW, height: boxH });
+  if(lineText){
+    var font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+    page.drawText(lineText, { x: x, y: Math.min(size.height - 10, y + boxH + 2), size: 8, font: font, color: PDFLib.rgb(0.1,0.1,0.1) });
+  }
+  return await pdfDoc.saveAsBase64();
+}
+
+// Aperçu d'une page PDF avec choix de positions par clic. markers: [{key,label,color}]
+async function buildPositionPicker(host, b64, pageNum, markers){
+  var pdf = await pdfjsLib.getDocument({ data: base64ToBytes(b64) }).promise;
+  var pn = (pageNum && pageNum >= 1 && pageNum <= pdf.numPages) ? pageNum : pdf.numPages;
+  var page = await pdf.getPage(pn);
+  var vp0 = page.getViewport({ scale: 1 });
+  var scale = Math.min(1.4, 640 / vp0.width);
+  var vp = page.getViewport({ scale: scale });
+  host.innerHTML =
+    '<div style="margin-bottom:6px;">' + markers.map(function(m,i){ return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;font-size:13px;"><input type="radio" name="pk_'+host.id+'" value="'+m.key+'" style="width:auto;"'+(i===0?' checked':'')+'> <span style="color:'+m.color+';font-weight:700;">■</span> '+m.label+'</label>'; }).join('') + '</div>' +
+    '<div style="position:relative;display:inline-block;max-width:100%;"><canvas style="max-width:100%;border:1px solid var(--line);cursor:crosshair;"></canvas><div class="pkLayer" style="position:absolute;inset:0;pointer-events:none;"></div></div>' +
+    '<p class="muted" style="margin-top:4px;">Cliquez sur la page à l\'endroit où doit apparaître chaque signature (page '+pn+'/'+pdf.numPages+').</p>';
+  var cv = host.querySelector('canvas');
+  cv.width = vp.width; cv.height = vp.height;
+  await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+  var layer = host.querySelector('.pkLayer');
+  var positions = {};
+  function draw(){
+    layer.innerHTML = markers.map(function(m){
+      var p = positions[m.key]; if(!p) return '';
+      return '<div style="position:absolute;left:'+(p.x*100-11)+'%;top:'+(p.y*100)+'%;width:22%;height:8%;transform:translateY(-50%);border:2px dashed '+m.color+';background:'+m.color+'22;font-size:10px;color:'+m.color+';font-weight:700;">'+m.label+'</div>';
+    }).join('');
+  }
+  cv.addEventListener('click', function(e){
+    var r = cv.getBoundingClientRect();
+    var sel = host.querySelector('input[type=radio]:checked').value;
+    positions[sel] = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    draw();
+  });
+  return { positions: positions };
+}
+
+async function renderAdminContrats(){
+  headerTitle.textContent = 'Contrats & DPAE';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var workers = await getWorkers();
+  workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
+  var reglementSaved = await getAgroData('reglement-interieur', null);
+  var lieuDef = (await getAgroData('employeur-info', {})).lieu || 'Leuilly-sous-Coucy';
+  var optionsHtml = '<option value="">— non trouvé, choisir —</option>' + workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
+
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackCt">‹ Retour à l\'import en masse</button>' +
+    '<p class="muted" style="margin-top:6px;">1) Importez les contrats/DPAE en PDF. 2) Placez les signatures. 3) Dessinez votre signature : elle est apposée, datée d\'aujourd\'hui, sur chaque document, puis ceux-ci sont déposés dans le porte-documents de chaque salarié, qui doit à son tour les signer.</p>' +
+
+    '<div class="section-title">1. Contrats / DPAE</div>' +
+    '<div class="card stack">' +
+      '<div><label>Fichiers PDF (plusieurs à la fois)</label><input type="file" id="ctFiles" accept="application/pdf" multiple></div>' +
+      '<div id="ctList"></div>' +
+    '</div>' +
+
+    '<div class="section-title">Règlement intérieur (à faire signer à chaque salarié)</div>' +
+    '<div class="card stack">' +
+      (reglementSaved ? '<p style="margin:0;">Enregistré : <strong>'+reglementSaved.name+'</strong></p>' : '<p class="muted" style="margin:0;">Aucun règlement enregistré.</p>') +
+      '<div><label>'+(reglementSaved?'Remplacer par un autre PDF (facultatif)':'Importer le règlement (PDF)')+'</label><input type="file" id="regFile" accept="application/pdf"></div>' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="checkbox" id="regJoindre" style="width:auto;" '+(reglementSaved?'checked':'')+'> Joindre le règlement intérieur à signer</label>' +
+    '</div>' +
+
+    '<div class="section-title">2. Emplacement des signatures</div>' +
+    '<div class="card stack">' +
+      '<div><label>Page de signature du contrat (vide = dernière page)</label><input type="number" id="ctPage" min="1" placeholder="dernière"></div>' +
+      '<div id="pickContrat"><p class="muted">Importez d\'abord un contrat pour voir l\'aperçu.</p></div>' +
+      '<div id="pickRegWrap" class="hidden"><label>Règlement intérieur — signature du salarié</label><div id="pickReg"></div></div>' +
+    '</div>' +
+
+    '<div class="section-title">3. Votre signature</div>' +
+    '<div class="card stack">' +
+      '<div><label>Lieu</label><input id="ctLieu" value="'+lieuDef+'"></div>' +
+      '<p style="margin:0;">Date apposée : <strong>'+frDate(todayISO())+'</strong> (aujourd\'hui)</p>' +
+      '<canvas id="ctSignCanvas" width="500" height="150" style="border:1px solid var(--line);border-radius:8px;width:100%;max-width:500px;background:#fff;"></canvas>' +
+      '<button class="btn btn-ghost" id="btnClearCt">Effacer</button>' +
+    '</div>' +
+    '<button class="btn btn-gold" id="btnSignDeposer">Signer et déposer dans les porte-documents</button>' +
+    '<div id="ctResult" class="muted" style="text-align:center;margin-top:8px;"></div>' +
+
+    '<div class="section-title">Suivi des signatures des salariés</div>' +
+    '<div id="ctSuivi"><p class="muted">Chargement…</p></div>';
+
+  document.getElementById('btnBackCt').onclick = function(){ state.screen='adminBulkImport'; render(); };
+
+  var pad = makeSignaturePad(document.getElementById('ctSignCanvas'));
+  document.getElementById('btnClearCt').onclick = function(){ pad.clear(); };
+
+  var contrats = []; // {file,b64,match}
+  var picker = null, pickerReg = null;
+  var reglement = reglementSaved; // {name,data}
+
+  async function refreshPicker(){
+    var host = document.getElementById('pickContrat');
+    if(!contrats.length || !window.pdfjsLib || !window.PDFLib){ return; }
+    var pg = parseInt(document.getElementById('ctPage').value,10) || null;
+    host.id = 'pickContrat';
+    picker = await buildPositionPicker(host, contrats[0].b64, pg, [
+      { key:'employeur', label:'Employeur', color:'#33502E' },
+      { key:'salarie', label:'Salarié', color:'#A32638' }
+    ]);
+  }
+  document.getElementById('ctPage').addEventListener('change', refreshPicker);
+
+  async function refreshPickerReg(){
+    var wrap = document.getElementById('pickRegWrap');
+    if(!reglement || !document.getElementById('regJoindre').checked){ wrap.classList.add('hidden'); pickerReg = null; return; }
+    wrap.classList.remove('hidden');
+    pickerReg = await buildPositionPicker(document.getElementById('pickReg'), reglement.data, null, [{ key:'salarie', label:'Salarié', color:'#A32638' }]);
+  }
+  document.getElementById('regJoindre').addEventListener('change', refreshPickerReg);
+  document.getElementById('regFile').addEventListener('change', async function(e){
+    var f = e.target.files[0]; if(!f) return;
+    reglement = { name: f.name, data: await fileToBase64(f) };
+    await saveAgroData('reglement-interieur', reglement);
+    document.getElementById('regJoindre').checked = true;
+    await refreshPickerReg();
+  });
+  if(reglement) refreshPickerReg();
+
+  document.getElementById('ctFiles').addEventListener('change', async function(e){
+    var files = Array.from(e.target.files);
+    document.getElementById('ctList').innerHTML = '<p class="muted">Analyse en cours…</p>';
+    contrats = [];
+    for(var i=0;i<files.length;i++){
+      var f = files[i], match = null;
+      if(window.pdfjsLib){
+        var text = await extractPdfText(f);
+        if(text) match = findWorkerInText(text, workers);
+      }
+      if(!match){ var nn = normalize(f.name); match = workers.find(function(w){ return w.key && nn.indexOf(w.key) !== -1; }); }
+      contrats.push({ file: f, b64: await fileToBase64(f), match: match });
+    }
+    document.getElementById('ctList').innerHTML = contrats.map(function(c,i){
+      var opts = optionsHtml.replace('value="'+(c.match?c.match.id:'__none__')+'"', 'value="'+(c.match?c.match.id:'')+'" selected');
+      return '<div class="doc-item" style="align-items:center;"><span style="flex:1;">'+c.file.name+'</span><select data-ctidx="'+i+'" style="max-width:140px;padding:8px;border-radius:8px;border:1px solid var(--line);">'+opts+'</select></div>';
+    }).join('');
+    await refreshPicker();
+  });
+
+  async function loadSuivi(){
+    var el = document.getElementById('ctSuivi');
+    var allDocs = await Promise.all(workers.map(function(w){ return getDocuments(w.id); }));
+    var rows = '', pending = 0, done = 0;
+    workers.forEach(function(w, i){
+      var list = allDocs[i].filter(function(d){ return d.aSigner; });
+      if(!list.length) return;
+      rows += '<div class="worker-row" style="align-items:flex-start;"><span class="worker-name">'+w.prenom+'</span><span style="text-align:right;">' +
+        list.map(function(d){
+          var ok = d.statut === 'signe';
+          if(ok) done++; else pending++;
+          return '<span style="display:block;font-size:13px;color:'+(ok?'var(--moss)':'var(--ink-soft)')+';">'+(ok?'✓ signé':(WORKER_SIGN_ENABLED?'⏳ à signer':'signé par vous, non visible du salarié'))+' — '+(d.kind==='reglement'?'Règlement':'Contrat')+'</span>';
+        }).join('') + '</span></div>';
+    });
+    el.innerHTML = rows ?
+      '<div class="card">'+rows+'</div><div class="muted" style="margin-bottom:8px;">'+(WORKER_SIGN_ENABLED ? done+' signé(s), '+pending+' en attente.' : 'Documents signés par vous et rangés dans le dossier de chaque salarié, invisibles pour eux (envoi désactivé pour l\'instant).')+'</div>'+(WORKER_SIGN_ENABLED ? '<button class="btn btn-ghost" id="btnMailRecap">M\'envoyer le récap par mail (signés + liste à faire)</button><div id="mailRes" class="muted" style="text-align:center;margin-top:6px;"></div>' : '')
+      : '<p class="muted">Aucun document à signer déposé pour l\'instant.</p>';
+    var b = document.getElementById('btnMailRecap');
+    if(b) b.onclick = async function(){
+      document.getElementById('mailRes').textContent = 'Envoi…';
+      try{
+        var r = await fetch('/api/send-admin-daily-report?mode=signatures&manual=1');
+        var j = await r.json();
+        document.getElementById('mailRes').textContent = j.envoye ? 'Mail envoyé ('+j.joints+' document(s) joint(s), '+j.enAttente+' salarié(s) en attente).' : ('Échec : '+(j.error||'erreur'));
+      }catch(err){ document.getElementById('mailRes').textContent = 'Erreur : '+err.message; }
+    };
+  }
+  loadSuivi();
+
+  document.getElementById('btnSignDeposer').onclick = async function(){
+    var selects = document.querySelectorAll('select[data-ctidx]');
+    var assigned = [];
+    selects.forEach(function(s){ if(s.value) assigned.push({ c: contrats[parseInt(s.getAttribute('data-ctidx'),10)], wid: s.value }); });
+    if(!assigned.length){ alert('Importez au moins un contrat et rattachez-le à un salarié.'); return; }
+    if(!window.PDFLib){ alert('Bibliothèque PDF non chargée, rechargez la page.'); return; }
+    if(pad.isEmpty()){ alert('Dessinez d\'abord votre signature.'); return; }
+    var posC = picker && picker.positions;
+    if(!posC || !posC.employeur){ alert('Cliquez sur l\'aperçu du contrat pour placer la signature Employeur.'); return; }
+    var joindre = document.getElementById('regJoindre').checked && reglement;
+    if(joindre && !(pickerReg && pickerReg.positions.salarie)){ alert('Placez la signature Salarié sur le règlement intérieur.'); return; }
+    var dateStr = frDate(todayISO());
+    var lieu = document.getElementById('ctLieu').value.trim();
+    if(!confirm('Apposer VOTRE signature, datée du '+dateStr+', sur '+assigned.length+' document(s) et les déposer chez les salariés concernés ?')) return;
+
+    var sig = pad.toDataURL();
+    var pg = parseInt(document.getElementById('ctPage').value,10) || null;
+    var res = document.getElementById('ctResult');
+    var ok = 0, errs = [];
+    var lieuInfo = await getAgroData('employeur-info', {}); lieuInfo.lieu = lieu; await saveAgroData('employeur-info', lieuInfo);
+    for(var i=0;i<assigned.length;i++){
+      var a = assigned[i];
+      var w = workers.find(function(x){ return x.id === a.wid; });
+      res.textContent = 'Signature '+(i+1)+'/'+assigned.length+' ('+(w?w.prenom:'')+')…';
+      try{
+        var signed = await stampPdfBase64(a.c.b64, sig, posC.employeur, 'Fait à '+lieu+', le '+dateStr, pg);
+        var docs = await getDocuments(a.wid);
+        docs.push({ id:'ct-'+Date.now()+'-'+i, name:'Contrat_'+(w?w.prenom:'')+'_'+a.c.file.name.replace(/\.pdf$/i,'')+'.pdf', type:'application/pdf', data:signed, uploadedAt:new Date().toISOString(), kind:'contrat', aSigner:true, statut:'a_signer', signEmployeurLe:new Date().toISOString(), empPos: posC.salarie||null, signPage: pg });
+        if(joindre && !docs.some(function(d){ return d.kind==='reglement'; })){
+          docs.push({ id:'rg-'+Date.now()+'-'+i, name:'Reglement_interieur_'+(w?w.prenom:'')+'.pdf', type:'application/pdf', data:reglement.data, uploadedAt:new Date().toISOString(), kind:'reglement', aSigner:true, statut:'a_signer', empPos: pickerReg.positions.salarie, signPage:null });
+        }
+        await saveDocuments(a.wid, docs);
+        ok++;
+      }catch(err){ errs.push((w?w.prenom:'?')+' : '+err.message); }
+    }
+    res.textContent = ok+' document(s) signé(s) et déposé(s)'+(errs.length?' — erreurs : '+errs.join(' ; '):'')+'.';
+    loadSuivi();
+  };
+}
+
+// Écran de signature côté salarié
+async function renderWorkerSign(){
+  headerTitle.textContent = 'Signer';
+  app.innerHTML = '<p class="muted">Chargement…</p>';
+  var docs = await getDocuments(state.worker.id);
+  var d = docs.find(function(x){ return x.id === state.signDocId; });
+  if(!d){ state.screen='workerDocs'; render(); return; }
+  app.innerHTML =
+    '<button class="btn btn-ghost" id="btnBackSign">‹ Retour aux documents</button>' +
+    '<p class="muted" style="margin-top:6px;">Lisez le document ci-dessous, puis dessinez votre signature.</p>' +
+    '<div class="card" id="signPages" style="padding:8px;overflow:auto;max-height:60vh;"></div>' +
+    '<div class="card stack">' +
+      '<label style="display:flex;align-items:center;gap:8px;font-size:14px;"><input type="checkbox" id="signLu" style="width:auto;"> J\'ai lu et j\'approuve ce document</label>' +
+      '<canvas id="wSignCanvas" width="500" height="150" style="border:1px solid var(--line);border-radius:8px;width:100%;max-width:500px;background:#fff;"></canvas>' +
+      '<button class="btn btn-ghost" id="btnClearW">Effacer</button>' +
+    '</div>' +
+    '<button class="btn btn-gold" id="btnDoSign">Signer le document</button>' +
+    '<div id="signRes" class="muted" style="text-align:center;margin-top:8px;"></div>';
+  document.getElementById('btnBackSign').onclick = function(){ state.screen='workerDocs'; render(); };
+  var pad = makeSignaturePad(document.getElementById('wSignCanvas'));
+  document.getElementById('btnClearW').onclick = function(){ pad.clear(); };
+
+  try{
+    var pdf = await pdfjsLib.getDocument({ data: base64ToBytes(d.data) }).promise;
+    var host = document.getElementById('signPages');
+    host.innerHTML = '';
+    for(var p=1;p<=pdf.numPages;p++){
+      var page = await pdf.getPage(p);
+      var vp0 = page.getViewport({ scale: 1 });
+      var vp = page.getViewport({ scale: Math.min(1.6, 700 / vp0.width) });
+      var cv = document.createElement('canvas');
+      cv.width = vp.width; cv.height = vp.height; cv.style.cssText = 'max-width:100%;display:block;margin:0 auto 8px;border:1px solid var(--line);';
+      host.appendChild(cv);
+      await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+    }
+  }catch(err){ document.getElementById('signPages').innerHTML = '<p class="muted">Aperçu indisponible. <a href="#" id="dlSign">Télécharger le document</a></p>'; var l=document.getElementById('dlSign'); if(l) l.onclick=function(e){ e.preventDefault(); downloadBase64File(d.data,d.type,d.name); }; }
+
+  document.getElementById('btnDoSign').onclick = async function(){
+    if(!document.getElementById('signLu').checked){ alert('Cochez « J\'ai lu et j\'approuve ».'); return; }
+    if(pad.isEmpty()){ alert('Dessinez votre signature.'); return; }
+    var res = document.getElementById('signRes'); res.textContent = 'Signature en cours…';
+    try{
+      var pos = d.empPos || { x: 0.75, y: 0.9 };
+      var signed = await stampPdfBase64(d.data, pad.toDataURL(), pos, 'Lu et approuvé — le '+frDate(todayISO()), d.signPage);
+      var fresh = await getDocuments(state.worker.id);
+      var t = fresh.find(function(x){ return x.id === d.id; });
+      if(t){ t.data = signed; t.statut = 'signe'; t.signeSalarieLe = new Date().toISOString(); }
+      await saveDocuments(state.worker.id, fresh);
+      res.textContent = 'Document signé. Merci !';
+      if(WORKER_SIGN_ENABLED) fetch('/api/send-admin-daily-report?mode=signatures').catch(function(){});
+      setTimeout(function(){ state.screen='workerDocs'; render(); }, 1200);
+    }catch(err){ res.textContent = 'Erreur : '+err.message; }
+  };
 }
 
 async function renderAdminPayroll(){
@@ -3795,7 +4403,7 @@ async function exportExcel(allData, mods, monthFilter){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null, attestationWorkerId:null, signDocId:null }; render(); };
 
 render();
 })();
