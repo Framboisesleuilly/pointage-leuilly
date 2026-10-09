@@ -131,6 +131,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chart.js/4.4.4/chart.umd.min.js"></script>
 <script>
@@ -227,6 +228,22 @@ function downloadBase64File(base64, mimeType, filename){
   }catch(err){
     alert('Erreur lors du téléchargement : ' + err.message);
   }
+}
+
+async function downloadDocsZip(entries, zipName){
+  // entries: [{folder, name, data(base64)}]
+  if(!window.JSZip){ alert('Bibliothèque ZIP non chargée, rechargez la page.'); return; }
+  var zip = new JSZip(); var used = {};
+  entries.forEach(function(e){
+    var path = (e.folder ? e.folder+'/' : '') + e.name;
+    if(used[path]){ used[path]++; path = (e.folder ? e.folder+'/' : '') + used[path] + '_' + e.name; } else { used[path] = 1; }
+    zip.file(path, e.data, { base64: true });
+  });
+  var blob = await zip.generateAsync({ type:'blob' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href = url; a.download = zipName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
 }
 
 function fileToBase64(file){
@@ -1197,10 +1214,11 @@ async function renderAdminWorkerDetail(){
   docsHtml += '<div><label>Ajouter un document</label><input type="file" id="docFile"></div>';
   docsHtml += '<button class="btn btn-primary" id="btnUploadDoc">Ajouter</button>';
   if(docs.length){
+    docsHtml += '<button class="btn btn-ghost" id="btnZipWorker" style="margin-top:10px;">Tout télécharger (ZIP, '+docs.length+' document(s))</button>';
     docsHtml += '<div style="margin-top:10px;">';
     docs.slice().sort(function(a,b){ return (b.uploadedAt||'').localeCompare(a.uploadedAt||''); }).forEach(function(d){
       var dateStr = d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString('fr-FR') : '';
-      docsHtml += '<div class="doc-item"><span>'+d.name+'<br><span class="muted">'+dateStr+'</span></span><button class="btn btn-ghost" style="width:auto;padding:8px 14px;color:var(--red);" data-delid="'+d.id+'">Supprimer</button></div>';
+      docsHtml += '<div class="doc-item"><span>'+d.name+'<br><span class="muted">'+dateStr+'</span></span><span style="display:flex;gap:6px;"><button class="btn btn-ghost" style="width:auto;padding:8px 14px;" data-admdl="'+d.id+'">Télécharger</button><button class="btn btn-ghost" style="width:auto;padding:8px 14px;color:var(--red);" data-delid="'+d.id+'">Supprimer</button></span></div>';
     });
     docsHtml += '</div>';
   } else {
@@ -1231,6 +1249,18 @@ async function renderAdminWorkerDetail(){
     current.push({ id: 'doc-'+Date.now(), name: niceName, type: file.type || 'application/octet-stream', data: base64, uploadedAt: new Date().toISOString(), periodLabel: periodLabel, netAPayer: payroll.netAPayer, cotisations: payroll.cotisations, heuresBulletin: payroll.heuresBulletin });
     await saveDocuments(w.id, current);
     renderAdminWorkerDetail();
+  };
+  document.querySelectorAll('button[data-admdl]').forEach(function(btn){
+    btn.onclick = function(){
+      var d = docs.find(function(x){ return x.id === btn.getAttribute('data-admdl'); });
+      if(d) downloadBase64File(d.data, d.type, d.name);
+    };
+  });
+  var zipBtn = document.getElementById('btnZipWorker');
+  if(zipBtn) zipBtn.onclick = async function(){
+    zipBtn.textContent = 'Préparation du ZIP…';
+    await downloadDocsZip(docs.map(function(d){ return { folder:'', name:d.name, data:d.data }; }), 'Documents_'+w.prenom+'.zip');
+    zipBtn.textContent = 'Tout télécharger (ZIP, '+docs.length+' document(s))';
   };
   document.querySelectorAll('button[data-delid]').forEach(function(btn){
     btn.onclick = async function(){
@@ -1394,8 +1424,24 @@ async function renderAdminBulkImport(){
       '<p class="muted" style="margin-top:-6px;">Importez les contrats en masse, signez-les en une fois (signature dessinée, datée du jour), ils sont déposés chez chaque salarié pour signature, avec le règlement intérieur.</p>' +
       '<button class="btn btn-gold" id="btnGoContrats">Ouvrir</button>' +
     '</div>' +
+    '<div class="card stack">' +
+      '<div class="section-title" style="margin-top:0;">Télécharger les documents des salariés</div>' +
+      '<p class="muted" style="margin-top:-6px;">Un ZIP avec un dossier par salarié (bulletins, contrats, etc.).</p>' +
+      '<button class="btn btn-ghost" id="btnZipAll">Tout télécharger (ZIP)</button>' +
+      '<div id="zipAllRes" class="muted"></div>' +
+    '</div>' +
     '<div id="bulkList"></div>';
 
+  document.getElementById('btnZipAll').onclick = async function(){
+    var res = document.getElementById('zipAllRes'); res.textContent = 'Récupération des documents…';
+    var all = await Promise.all(workers.map(function(w){ return getDocuments(w.id); }));
+    var entries = [];
+    workers.forEach(function(w, i){ all[i].forEach(function(d){ entries.push({ folder:w.prenom, name:d.name, data:d.data }); }); });
+    if(!entries.length){ res.textContent = 'Aucun document.'; return; }
+    res.textContent = 'Création du ZIP ('+entries.length+' fichiers)…';
+    await downloadDocsZip(entries, 'Documents_salaries_'+todayISO()+'.zip');
+    res.textContent = 'ZIP téléchargé ('+entries.length+' fichiers).';
+  };
   document.getElementById('btnBackBulk').onclick = function(){ state.screen='adminMenu'; render(); };
   document.getElementById('btnGoContrats').onclick = function(){ state.screen='adminContrats'; render(); };
   document.getElementById('btnGoAttestation').onclick = function(){
