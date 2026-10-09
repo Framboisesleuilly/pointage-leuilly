@@ -310,7 +310,7 @@ function extractPayrollInfo(rawText){
   return info;
 }
 
-var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null, attestationWorkerId:null, signDocId:null };
+var state = { screen:'home', worker:null, sorter:null, editDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null, attestationWorkerId:null, signDocId:null, docsMode:null };
 
 function todayISO(){ var d = new Date(); return d.toISOString().slice(0,10); }
 function frDate(iso){ var p = iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -1425,6 +1425,11 @@ async function renderAdminBulkImport(){
       '<button class="btn btn-gold" id="btnGoContrats">Ouvrir</button>' +
     '</div>' +
     '<div class="card stack">' +
+      '<div class="section-title" style="margin-top:0;">Documents de fin de contrat</div>' +
+      '<p class="muted" style="margin-top:-6px;">Même principe : import en masse, signature dessinée datée du jour sur chaque document, dépôt dans le dossier de chaque salarié.</p>' +
+      '<button class="btn btn-gold" id="btnGoFin">Ouvrir</button>' +
+    '</div>' +
+    '<div class="card stack">' +
       '<div class="section-title" style="margin-top:0;">Télécharger les documents des salariés</div>' +
       '<p class="muted" style="margin-top:-6px;">Un ZIP avec un dossier par salarié (bulletins, contrats, etc.).</p>' +
       '<button class="btn btn-ghost" id="btnZipAll">Tout télécharger (ZIP)</button>' +
@@ -1443,7 +1448,8 @@ async function renderAdminBulkImport(){
     res.textContent = 'ZIP téléchargé ('+entries.length+' fichiers).';
   };
   document.getElementById('btnBackBulk').onclick = function(){ state.screen='adminMenu'; render(); };
-  document.getElementById('btnGoContrats').onclick = function(){ state.screen='adminContrats'; render(); };
+  document.getElementById('btnGoContrats').onclick = function(){ state.docsMode='contrat'; state.screen='adminContrats'; render(); };
+  document.getElementById('btnGoFin').onclick = function(){ state.docsMode='fincontrat'; state.screen='adminContrats'; render(); };
   document.getElementById('btnGoAttestation').onclick = function(){
     var wid = document.getElementById('attestWorkerSel').value;
     if(!wid){ alert('Choisissez un salarié.'); return; }
@@ -1816,7 +1822,16 @@ function base64ToBytes(b64){
 }
 
 // Appose une signature (image PNG dessinée) + une ligne de texte sur une page d'un PDF. pos = {x,y} en fraction (0-1) depuis le haut-gauche.
-async function stampPdfBase64(b64, sigDataUrl, pos, lineText, pageNum){
+function imageToPngDataUrl(dataUrl){
+  return new Promise(function(resolve){
+    var im = new Image();
+    im.onload = function(){ try{ var cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight; cv.getContext('2d').drawImage(im,0,0); resolve(cv.toDataURL('image/png')); }catch(e){ resolve(dataUrl); } };
+    im.onerror = function(){ resolve(dataUrl); };
+    im.src = dataUrl;
+  });
+}
+
+async function stampPdfBase64(b64, sigDataUrl, pos, lineText, pageNum, tampon){
   var pdfDoc = await PDFLib.PDFDocument.load(base64ToBytes(b64), { ignoreEncryption: true });
   var pages = pdfDoc.getPages();
   var idx = (pageNum && pageNum >= 1 && pageNum <= pages.length) ? pageNum - 1 : pages.length - 1;
@@ -1831,6 +1846,13 @@ async function stampPdfBase64(b64, sigDataUrl, pos, lineText, pageNum){
   if(lineText){
     var font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
     page.drawText(lineText, { x: x, y: Math.min(size.height - 10, y + boxH + 2), size: 8, font: font, color: PDFLib.rgb(0.1,0.1,0.1) });
+  }
+  if(tampon && tampon.png && tampon.pos){
+    var timg = await pdfDoc.embedPng(tampon.png);
+    var tw = size.width * 0.2, th = timg.height * (tw / timg.width);
+    var tx = Math.max(0, Math.min(size.width - tw, tampon.pos.x * size.width - tw/2));
+    var ty = Math.max(0, Math.min(size.height - th, size.height - tampon.pos.y * size.height - th/2));
+    page.drawImage(timg, { x: tx, y: ty, width: tw, height: th });
   }
   return await pdfDoc.saveAsBase64();
 }
@@ -1868,34 +1890,39 @@ async function buildPositionPicker(host, b64, pageNum, markers){
 }
 
 async function renderAdminContrats(){
-  headerTitle.textContent = 'Contrats & DPAE';
+  var isFin = state.docsMode === 'fincontrat';
+  var kindDoc = isFin ? 'fincontrat' : 'contrat';
+  var docLabel = isFin ? 'Fin de contrat' : 'Contrat';
+  headerTitle.textContent = isFin ? 'Fin de contrat' : 'Contrats & DPAE';
   app.innerHTML = '<p class="muted">Chargement…</p>';
   var workers = await getWorkers();
   workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
   var reglementSaved = await getAgroData('reglement-interieur', null);
+  var tamponSaved = await getTamponImage();
+  var tamponPng = tamponSaved ? await imageToPngDataUrl(tamponSaved) : null;
   var lieuDef = (await getAgroData('employeur-info', {})).lieu || 'Leuilly-sous-Coucy';
   var optionsHtml = '<option value="">— non trouvé, choisir —</option>' + workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
 
   app.innerHTML =
     '<button class="btn btn-ghost" id="btnBackCt">‹ Retour à l\'import en masse</button>' +
-    '<p class="muted" style="margin-top:6px;">1) Importez les contrats/DPAE en PDF. 2) Placez les signatures. 3) Dessinez votre signature : elle est apposée, datée d\'aujourd\'hui, sur chaque document, puis ceux-ci sont déposés dans le porte-documents de chaque salarié, qui doit à son tour les signer.</p>' +
+    '<p class="muted" style="margin-top:6px;">'+(isFin ? 'Documents de fin de contrat (certificat de travail, solde de tout compte, attestation France Travail…) : ' : '')+'1) Importez les '+(isFin?'documents':'contrats/DPAE')+' en PDF. 2) Placez les signatures. 3) Dessinez votre signature : elle est apposée, datée d\'aujourd\'hui, sur chaque document, puis ceux-ci sont déposés dans le porte-documents de chaque salarié, qui doit à son tour les signer.</p>' +
 
-    '<div class="section-title">1. Contrats / DPAE</div>' +
+    '<div class="section-title">1. '+(isFin?'Documents de fin de contrat':'Contrats / DPAE')+'</div>' +
     '<div class="card stack">' +
       '<div><label>Fichiers PDF (plusieurs à la fois)</label><input type="file" id="ctFiles" accept="application/pdf" multiple></div>' +
       '<div id="ctList"></div>' +
     '</div>' +
 
-    '<div class="section-title">Règlement intérieur (à faire signer à chaque salarié)</div>' +
+    '<div class="'+(isFin?'hidden':'')+'"><div class="section-title">Règlement intérieur (à faire signer à chaque salarié)</div>' +
     '<div class="card stack">' +
       (reglementSaved ? '<p style="margin:0;">Enregistré : <strong>'+reglementSaved.name+'</strong></p>' : '<p class="muted" style="margin:0;">Aucun règlement enregistré.</p>') +
       '<div><label>'+(reglementSaved?'Remplacer par un autre PDF (facultatif)':'Importer le règlement (PDF)')+'</label><input type="file" id="regFile" accept="application/pdf"></div>' +
-      '<label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="checkbox" id="regJoindre" style="width:auto;" '+(reglementSaved?'checked':'')+'> Joindre le règlement intérieur à signer</label>' +
-    '</div>' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="checkbox" id="regJoindre" style="width:auto;" '+(reglementSaved&&!isFin?'checked':'')+'> Joindre le règlement intérieur à signer</label>' +
+    '</div></div>' +
 
     '<div class="section-title">2. Emplacement des signatures</div>' +
     '<div class="card stack">' +
-      '<div><label>Page de signature du contrat (vide = dernière page)</label><input type="number" id="ctPage" min="1" placeholder="dernière"></div>' +
+      '<div><label>Page de signature du document (vide = dernière page)</label><input type="number" id="ctPage" min="1" placeholder="dernière"></div>' +
       '<div id="pickContrat"><p class="muted">Importez d\'abord un contrat pour voir l\'aperçu.</p></div>' +
       '<div id="pickRegWrap" class="hidden"><label>Règlement intérieur — signature du salarié</label><div id="pickReg"></div></div>' +
     '</div>' +
@@ -1906,6 +1933,10 @@ async function renderAdminContrats(){
       '<p style="margin:0;">Date apposée : <strong>'+frDate(todayISO())+'</strong> (aujourd\'hui)</p>' +
       '<canvas id="ctSignCanvas" width="500" height="150" style="border:1px solid var(--line);border-radius:8px;width:100%;max-width:500px;background:#fff;"></canvas>' +
       '<button class="btn btn-ghost" id="btnClearCt">Effacer</button>' +
+      '<div><label>Tampon de la société (image)</label><input type="file" id="ctTamponFile" accept="image/*">' +
+        '<div id="ctTamponPrev" style="margin-top:6px;">'+(tamponPng?'<img src="'+tamponPng+'" style="max-height:80px;">':'<span class="muted">Aucun tampon enregistré.</span>')+'</div>' +
+        '<p class="muted" style="margin:4px 0 0;">Mémorisé pour les prochains lots. Une fois importé, il apparaît dans l\'aperçu (carré bleu) pour le placer.</p>' +
+      '</div>' +
     '</div>' +
     '<button class="btn btn-gold" id="btnSignDeposer">Signer et déposer dans les porte-documents</button>' +
     '<div id="ctResult" class="muted" style="text-align:center;margin-top:8px;"></div>' +
@@ -1927,12 +1958,22 @@ async function renderAdminContrats(){
     if(!contrats.length || !window.pdfjsLib || !window.PDFLib){ return; }
     var pg = parseInt(document.getElementById('ctPage').value,10) || null;
     host.id = 'pickContrat';
-    picker = await buildPositionPicker(host, contrats[0].b64, pg, [
+    var mk = [
       { key:'employeur', label:'Employeur', color:'#33502E' },
       { key:'salarie', label:'Salarié', color:'#A32638' }
-    ]);
+    ];
+    if(tamponPng) mk.push({ key:'tampon', label:'Tampon', color:'#1F5FA8' });
+    picker = await buildPositionPicker(host, contrats[0].b64, pg, mk);
   }
   document.getElementById('ctPage').addEventListener('change', refreshPicker);
+  document.getElementById('ctTamponFile').addEventListener('change', async function(e){
+    var f = e.target.files[0]; if(!f) return;
+    var raw = await new Promise(function(res){ var r = new FileReader(); r.onload = function(){ res(r.result); }; r.readAsDataURL(f); });
+    tamponPng = await imageToPngDataUrl(raw);
+    await saveTamponImage(tamponPng);
+    document.getElementById('ctTamponPrev').innerHTML = '<img src="'+tamponPng+'" style="max-height:80px;">';
+    await refreshPicker();
+  });
 
   async function refreshPickerReg(){
     var wrap = document.getElementById('pickRegWrap');
@@ -1948,7 +1989,7 @@ async function renderAdminContrats(){
     document.getElementById('regJoindre').checked = true;
     await refreshPickerReg();
   });
-  if(reglement) refreshPickerReg();
+  if(reglement && !isFin) refreshPickerReg();
 
   document.getElementById('ctFiles').addEventListener('change', async function(e){
     var files = Array.from(e.target.files);
@@ -1981,7 +2022,7 @@ async function renderAdminContrats(){
         list.map(function(d){
           var ok = d.statut === 'signe';
           if(ok) done++; else pending++;
-          return '<span style="display:block;font-size:13px;color:'+(ok?'var(--moss)':'var(--ink-soft)')+';">'+(ok?'✓ signé':(WORKER_SIGN_ENABLED?'⏳ à signer':'signé par vous, non visible du salarié'))+' — '+(d.kind==='reglement'?'Règlement':'Contrat')+'</span>';
+          return '<span style="display:block;font-size:13px;color:'+(ok?'var(--moss)':'var(--ink-soft)')+';">'+(ok?'✓ signé':(WORKER_SIGN_ENABLED?'⏳ à signer':'signé par vous, non visible du salarié'))+' — '+(d.kind==='reglement'?'Règlement':(d.kind==='fincontrat'?'Fin de contrat':'Contrat'))+'</span>';
         }).join('') + '</span></div>';
     });
     el.innerHTML = rows ?
@@ -2003,12 +2044,13 @@ async function renderAdminContrats(){
     var selects = document.querySelectorAll('select[data-ctidx]');
     var assigned = [];
     selects.forEach(function(s){ if(s.value) assigned.push({ c: contrats[parseInt(s.getAttribute('data-ctidx'),10)], wid: s.value }); });
-    if(!assigned.length){ alert('Importez au moins un contrat et rattachez-le à un salarié.'); return; }
+    if(!assigned.length){ alert('Importez au moins un document et rattachez-le à un salarié.'); return; }
     if(!window.PDFLib){ alert('Bibliothèque PDF non chargée, rechargez la page.'); return; }
     if(pad.isEmpty()){ alert('Dessinez d\'abord votre signature.'); return; }
     var posC = picker && picker.positions;
-    if(!posC || !posC.employeur){ alert('Cliquez sur l\'aperçu du contrat pour placer la signature Employeur.'); return; }
-    var joindre = document.getElementById('regJoindre').checked && reglement;
+    if(!posC || !posC.employeur){ alert('Cliquez sur l\'aperçu du document pour placer la signature Employeur.'); return; }
+    if(tamponPng && !posC.tampon){ alert('Cliquez sur l\'aperçu pour placer le tampon (choisissez « Tampon » au-dessus de l\'aperçu).'); return; }
+    var joindre = !isFin && document.getElementById('regJoindre').checked && reglement;
     if(joindre && !(pickerReg && pickerReg.positions.salarie)){ alert('Placez la signature Salarié sur le règlement intérieur.'); return; }
     var dateStr = frDate(todayISO());
     var lieu = document.getElementById('ctLieu').value.trim();
@@ -2024,9 +2066,9 @@ async function renderAdminContrats(){
       var w = workers.find(function(x){ return x.id === a.wid; });
       res.textContent = 'Signature '+(i+1)+'/'+assigned.length+' ('+(w?w.prenom:'')+')…';
       try{
-        var signed = await stampPdfBase64(a.c.b64, sig, posC.employeur, 'Fait à '+lieu+', le '+dateStr, pg);
+        var signed = await stampPdfBase64(a.c.b64, sig, posC.employeur, 'Fait à '+lieu+', le '+dateStr, pg, tamponPng ? { png: tamponPng, pos: posC.tampon } : null);
         var docs = await getDocuments(a.wid);
-        docs.push({ id:'ct-'+Date.now()+'-'+i, name:'Contrat_'+(w?w.prenom:'')+'_'+a.c.file.name.replace(/\.pdf$/i,'')+'.pdf', type:'application/pdf', data:signed, uploadedAt:new Date().toISOString(), kind:'contrat', aSigner:true, statut:'a_signer', signEmployeurLe:new Date().toISOString(), empPos: posC.salarie||null, signPage: pg });
+        docs.push({ id:'ct-'+Date.now()+'-'+i, name:docLabel.replace(/ /g,'')+'_'+(w?w.prenom:'')+'_'+a.c.file.name.replace(/\.pdf$/i,'')+'.pdf', type:'application/pdf', data:signed, uploadedAt:new Date().toISOString(), kind:kindDoc, aSigner:true, statut:'a_signer', signEmployeurLe:new Date().toISOString(), empPos: posC.salarie||null, signPage: pg });
         if(joindre && !docs.some(function(d){ return d.kind==='reglement'; })){
           docs.push({ id:'rg-'+Date.now()+'-'+i, name:'Reglement_interieur_'+(w?w.prenom:'')+'.pdf', type:'application/pdf', data:reglement.data, uploadedAt:new Date().toISOString(), kind:'reglement', aSigner:true, statut:'a_signer', empPos: pickerReg.positions.salarie, signPage:null });
         }
@@ -4449,7 +4491,7 @@ async function exportExcel(allData, mods, monthFilter){
   XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
 }
 
-btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null, attestationWorkerId:null, signDocId:null }; render(); };
+btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null, attestationWorkerId:null, signDocId:null, docsMode:null }; render(); };
 
 render();
 })();
