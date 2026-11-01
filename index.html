@@ -293,6 +293,52 @@ function findWorkerInText(rawText, workers){
   }
   return null;
 }
+// ===== Reconnaissance du salarié dans un document (prénom, nom, date de naissance) =====
+function normWords(s){ return ' ' + normalize(s||'').replace(/[^a-z0-9]+/g,' ').trim() + ' '; }
+function scoreWorkerInText(textNorm, rawText, w, nom){
+  var s = 0, why = [];
+  var pre = normWords(w.prenom);
+  var preT = pre.trim();
+  if(preT){
+    var toks = preT.split(' ').filter(Boolean);
+    if(textNorm.indexOf(pre) !== -1){ s += 3; why.push('prénom'); }
+    else if(toks.length > 1 && textNorm.indexOf(' '+toks.join('')+' ') !== -1){ s += 3; why.push('prénom'); }
+    else if(toks.length > 1 && toks.every(function(t){ return textNorm.indexOf(' '+t+' ') !== -1; })){ s += 2; why.push('prénom'); }
+  }
+  if(nom){
+    var nn = normWords(nom);
+    if(nn.trim() && textNorm.indexOf(nn) !== -1){ s += 3; why.push('nom'); }
+  }
+  if(w.dob && rawText){
+    var p = w.dob.split('-');
+    if(p.length === 3){
+      var re = new RegExp('(^|[^0-9])0?'+parseInt(p[2],10)+'[\\/.\\- ]0?'+parseInt(p[1],10)+'[\\/.\\- ]'+p[0]+'([^0-9]|$)');
+      if(re.test(rawText)){ s += 5; why.push('date de naissance'); }
+    }
+  }
+  return { score: s, why: why };
+}
+// noms : { workerId: 'Dupont' } (facultatif). Retourne { worker, why, ambiguous:[prénoms] }
+function matchWorkerSmart(text, filename, workers, noms){
+  noms = noms || {};
+  var tn = normWords(text||''), fn = normWords((filename||'').replace(/\.[a-z0-9]+$/i,''));
+  var ranked = workers.map(function(w){
+    var a = scoreWorkerInText(tn, text||'', w, w.nom || noms[w.id]);
+    var b = scoreWorkerInText(fn, '', w, w.nom || noms[w.id]);
+    return { w: w, total: a.score + b.score*0.6, why: a.why.length ? a.why : b.why };
+  }).filter(function(r){ return r.total >= 3; }).sort(function(x,y){ return y.total - x.total; });
+  if(!ranked.length) return { worker: null, why: [], ambiguous: [] };
+  if(ranked.length > 1 && ranked[1].total >= ranked[0].total){
+    return { worker: null, why: [], ambiguous: ranked.filter(function(r){ return r.total === ranked[0].total; }).map(function(r){ return r.w.prenom; }) };
+  }
+  return { worker: ranked[0].w, why: ranked[0].why, ambiguous: [] };
+}
+async function getNomsMap(){
+  var infos = await getAttestationInfos(); var m = {};
+  Object.keys(infos||{}).forEach(function(id){ if(infos[id] && infos[id].nom) m[id] = infos[id].nom; });
+  return m;
+}
+
 function extractPeriodLabel(rawText){
   var m = rawText.match(/[Dd]u\s+(\d{2})\/(\d{2})\/(\d{4})\s+au/);
   if(!m) return null;
@@ -1402,6 +1448,7 @@ async function renderAdminBulkImport(){
   var workers = await getWorkers();
   workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
 
+  var nomsMapB = await getNomsMap();
   var optionsHtml = '<option value="">— non trouvé, choisir —</option>' +
     workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
 
@@ -1468,18 +1515,15 @@ async function renderAdminBulkImport(){
       var match = null;
       var periodLabel = null;
       var payroll = { netAPayer: null, cotisations: null, heuresBulletin: null };
+      var textB = '';
       if(file.type === 'application/pdf' && window.pdfjsLib){
-        var text = await extractPdfText(file);
-        if(text){
-          match = findWorkerInText(text, workers);
-          periodLabel = extractPeriodLabel(text);
-          payroll = extractPayrollInfo(text);
+        textB = await extractPdfText(file);
+        if(textB){
+          periodLabel = extractPeriodLabel(textB);
+          payroll = extractPayrollInfo(textB);
         }
       }
-      if(!match){
-        var nameNorm = normalize(file.name);
-        match = workers.find(function(w){ return w.key && nameNorm.indexOf(w.key) !== -1; });
-      }
+      match = matchWorkerSmart(textB, file.name, workers, nomsMapB).worker;
       detections.push({ file: file, match: match, periodLabel: periodLabel, payroll: payroll });
     }
 
@@ -1858,7 +1902,7 @@ async function stampPdfBase64(b64, sigDataUrl, pos, lineText, pageNum, tampon){
 }
 
 // Aperçu d'une page PDF avec choix de positions par clic. markers: [{key,label,color}]
-async function buildPositionPicker(host, b64, pageNum, markers){
+async function buildPositionPicker(host, b64, pageNum, markers, initial){
   var pdf = await pdfjsLib.getDocument({ data: base64ToBytes(b64) }).promise;
   var pn = (pageNum && pageNum >= 1 && pageNum <= pdf.numPages) ? pageNum : pdf.numPages;
   var page = await pdf.getPage(pn);
@@ -1874,6 +1918,7 @@ async function buildPositionPicker(host, b64, pageNum, markers){
   await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
   var layer = host.querySelector('.pkLayer');
   var positions = {};
+  if(initial){ Object.keys(initial).forEach(function(k){ if(initial[k]) positions[k] = { x: initial[k].x, y: initial[k].y }; }); }
   function draw(){
     layer.innerHTML = markers.map(function(m){
       var p = positions[m.key]; if(!p) return '';
@@ -1886,8 +1931,21 @@ async function buildPositionPicker(host, b64, pageNum, markers){
     positions[sel] = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
     draw();
   });
+  draw();
   return { positions: positions };
 }
+
+async function pdfFingerprint(b64){
+  try{
+    var pdf = await pdfjsLib.getDocument({ data: base64ToBytes(b64) }).promise;
+    var pg = await pdf.getPage(1);
+    var tc = await pg.getTextContent();
+    var words = normalize(tc.items.map(function(i){ return i.str; }).join(' ')).replace(/[^a-z\s]/g,' ').split(/\s+/).filter(function(w){ return w.length >= 4; }).slice(0,6);
+    return pdf.numPages + '|' + words.join(' ');
+  }catch(e){ return '?|'; }
+}
+function getSavedSignature(){ try{ return localStorage.getItem('sigImageEmployeur') || null; }catch(e){ return null; } }
+function setSavedSignature(v){ try{ if(v) localStorage.setItem('sigImageEmployeur', v); else localStorage.removeItem('sigImageEmployeur'); }catch(e){} }
 
 async function renderAdminContrats(){
   var isFin = state.docsMode === 'fincontrat';
@@ -1898,14 +1956,16 @@ async function renderAdminContrats(){
   var workers = await getWorkers();
   workers.sort(function(a,b){ return a.prenom.localeCompare(b.prenom); });
   var reglementSaved = await getAgroData('reglement-interieur', null);
+  var layouts = await getAgroData('sign-layouts', {});
   var tamponSaved = await getTamponImage();
   var tamponPng = tamponSaved ? await imageToPngDataUrl(tamponSaved) : null;
   var lieuDef = (await getAgroData('employeur-info', {})).lieu || 'Leuilly-sous-Coucy';
+  var savedSig = getSavedSignature();
   var optionsHtml = '<option value="">— non trouvé, choisir —</option>' + workers.map(function(w){ return '<option value="'+w.id+'">'+w.prenom+'</option>'; }).join('');
 
   app.innerHTML =
     '<button class="btn btn-ghost" id="btnBackCt">‹ Retour à l\'import en masse</button>' +
-    '<p class="muted" style="margin-top:6px;">'+(isFin ? 'Documents de fin de contrat (certificat de travail, solde de tout compte, attestation France Travail…) : ' : '')+'1) Importez les '+(isFin?'documents':'contrats/DPAE')+' en PDF. 2) Placez les signatures. 3) Dessinez votre signature : elle est apposée, datée d\'aujourd\'hui, sur chaque document, puis ceux-ci sont déposés dans le porte-documents de chaque salarié, qui doit à son tour les signer.</p>' +
+    '<p class="muted" style="margin-top:6px;">'+(isFin ? 'Documents de fin de contrat (certificat de travail, solde de tout compte, attestation France Travail…) : ' : '')+'1) Importez les '+(isFin?'documents':'contrats/DPAE')+' en PDF. 2) Vérifiez les emplacements (mémorisés par modèle de document). 3) Signez : votre signature et le tampon sont apposés, datés d\'aujourd\'hui, sur chaque document, puis ceux-ci sont rangés dans le dossier de chaque salarié.</p>' +
 
     '<div class="section-title">1. '+(isFin?'Documents de fin de contrat':'Contrats / DPAE')+'</div>' +
     '<div class="card stack">' +
@@ -1918,24 +1978,29 @@ async function renderAdminContrats(){
       (reglementSaved ? '<p style="margin:0;">Enregistré : <strong>'+reglementSaved.name+'</strong></p>' : '<p class="muted" style="margin:0;">Aucun règlement enregistré.</p>') +
       '<div><label>'+(reglementSaved?'Remplacer par un autre PDF (facultatif)':'Importer le règlement (PDF)')+'</label><input type="file" id="regFile" accept="application/pdf"></div>' +
       '<label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="checkbox" id="regJoindre" style="width:auto;" '+(reglementSaved&&!isFin?'checked':'')+'> Joindre le règlement intérieur à signer</label>' +
+      '<div id="pickRegWrap" class="hidden"><label>Règlement intérieur — emplacement de la signature du salarié</label><div id="pickReg"></div></div>' +
     '</div></div>' +
 
-    '<div class="section-title">2. Emplacement des signatures</div>' +
-    '<div class="card stack">' +
-      '<div><label>Page de signature du document (vide = dernière page)</label><input type="number" id="ctPage" min="1" placeholder="dernière"></div>' +
-      '<div id="pickContrat"><p class="muted">Importez d\'abord un contrat pour voir l\'aperçu.</p></div>' +
-      '<div id="pickRegWrap" class="hidden"><label>Règlement intérieur — signature du salarié</label><div id="pickReg"></div></div>' +
-    '</div>' +
+    '<div class="section-title">2. Emplacement des signatures (par modèle de document)</div>' +
+    '<div id="ctGroups"><div class="card"><p class="muted" style="margin:0;">Importez d\'abord des documents : un aperçu par modèle apparaît ici, et l\'emplacement choisi est mémorisé pour les prochaines fois.</p></div></div>' +
 
-    '<div class="section-title">3. Votre signature</div>' +
+    '<div class="section-title">3. Votre signature et le tampon</div>' +
     '<div class="card stack">' +
       '<div><label>Lieu</label><input id="ctLieu" value="'+lieuDef+'"></div>' +
       '<p style="margin:0;">Date apposée : <strong>'+frDate(todayISO())+'</strong> (aujourd\'hui)</p>' +
-      '<canvas id="ctSignCanvas" width="500" height="150" style="border:1px solid var(--line);border-radius:8px;width:100%;max-width:500px;background:#fff;"></canvas>' +
-      '<button class="btn btn-ghost" id="btnClearCt">Effacer</button>' +
+      '<div id="ctSavedSigWrap" class="'+(savedSig?'':'hidden')+'">' +
+        '<img id="ctSavedSigImg" src="'+(savedSig||'')+'" style="max-height:70px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px;">' +
+        '<label style="display:flex;align-items:center;gap:6px;font-size:14px;margin-top:6px;"><input type="checkbox" id="ctUseSaved" style="width:auto;" checked> Utiliser ma signature mémorisée sur cet appareil</label>' +
+        '<button class="btn btn-ghost" id="btnForgetSig" style="margin-top:6px;">Oublier cette signature</button>' +
+      '</div>' +
+      '<div id="ctDrawWrap" class="'+(savedSig?'hidden':'')+'">' +
+        '<canvas id="ctSignCanvas" width="500" height="150" style="border:1px solid var(--line);border-radius:8px;width:100%;max-width:500px;background:#fff;"></canvas>' +
+        '<button class="btn btn-ghost" id="btnClearCt" style="margin-top:6px;">Effacer</button>' +
+        '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:6px;"><input type="checkbox" id="ctRememberSig" style="width:auto;"> Mémoriser ma signature sur cet appareil (elle n\'est pas envoyée au serveur)</label>' +
+      '</div>' +
       '<div><label>Tampon de la société (image)</label><input type="file" id="ctTamponFile" accept="image/*">' +
         '<div id="ctTamponPrev" style="margin-top:6px;">'+(tamponPng?'<img src="'+tamponPng+'" style="max-height:80px;">':'<span class="muted">Aucun tampon enregistré.</span>')+'</div>' +
-        '<p class="muted" style="margin:4px 0 0;">Mémorisé pour les prochains lots. Une fois importé, il apparaît dans l\'aperçu (carré bleu) pour le placer.</p>' +
+        '<p class="muted" style="margin:4px 0 0;">Mémorisé pour les prochains lots.</p>' +
       '</div>' +
     '</div>' +
     '<button class="btn btn-gold" id="btnSignDeposer">Signer et déposer dans les porte-documents</button>' +
@@ -1948,38 +2013,67 @@ async function renderAdminContrats(){
 
   var pad = makeSignaturePad(document.getElementById('ctSignCanvas'));
   document.getElementById('btnClearCt').onclick = function(){ pad.clear(); };
+  document.getElementById('ctUseSaved').addEventListener('change', function(){
+    document.getElementById('ctDrawWrap').classList.toggle('hidden', this.checked);
+  });
+  document.getElementById('btnForgetSig').onclick = function(){
+    if(!confirm('Oublier la signature mémorisée sur cet appareil ?')) return;
+    setSavedSignature(null); savedSig = null;
+    document.getElementById('ctSavedSigWrap').classList.add('hidden');
+    document.getElementById('ctDrawWrap').classList.remove('hidden');
+  };
 
-  var contrats = []; // {file,b64,match}
-  var picker = null, pickerReg = null;
+  var contrats = []; // {file,b64,match,fp}
+  var groups = [];   // {fp,idxs,label,picker}
+  var nomsMap = await getNomsMap();
+  var pickerReg = null;
   var reglement = reglementSaved; // {name,data}
 
-  async function refreshPicker(){
-    var host = document.getElementById('pickContrat');
-    if(!contrats.length || !window.pdfjsLib || !window.PDFLib){ return; }
-    var pg = parseInt(document.getElementById('ctPage').value,10) || null;
-    host.id = 'pickContrat';
+  function markersList(){
     var mk = [
       { key:'employeur', label:'Employeur', color:'#33502E' },
       { key:'salarie', label:'Salarié', color:'#A32638' }
     ];
     if(tamponPng) mk.push({ key:'tampon', label:'Tampon', color:'#1F5FA8' });
-    picker = await buildPositionPicker(host, contrats[0].b64, pg, mk);
+    return mk;
   }
-  document.getElementById('ctPage').addEventListener('change', refreshPicker);
+  async function buildGroupPicker(gi){
+    var g = groups[gi];
+    var pg = parseInt(document.getElementById('grpPage_'+gi).value,10) || null;
+    var initial = g.picker ? g.picker.positions : ((layouts[g.fp] && layouts[g.fp].pos) || {});
+    g.picker = await buildPositionPicker(document.getElementById('pickGrp_'+gi), contrats[g.idxs[0]].b64, pg, markersList(), initial);
+  }
+  async function renderGroups(){
+    var host = document.getElementById('ctGroups');
+    if(!groups.length){ return; }
+    host.innerHTML = groups.map(function(g, gi){
+      var saved = layouts[g.fp];
+      return '<div class="card stack">' +
+        '<div><label>Modèle de document ('+g.idxs.length+' fichier(s))</label><input id="grpLabel_'+gi+'" value="'+(g.label||'').replace(/"/g,'&quot;')+'"></div>' +
+        '<div style="font-size:13px;color:'+(saved?'var(--moss)':'var(--red)')+';">'+(saved?'✓ emplacement mémorisé pour ce modèle — vérifiez l\'aperçu':'Emplacement à placer (sera mémorisé)')+'</div>' +
+        '<div><label>Page de signature (vide = dernière page)</label><input type="number" id="grpPage_'+gi+'" min="1" placeholder="dernière" value="'+((saved&&saved.page)||'')+'"></div>' +
+        '<div id="pickGrp_'+gi+'"></div>' +
+      '</div>';
+    }).join('');
+    for(var gi=0; gi<groups.length; gi++){
+      (function(gi2){ document.getElementById('grpPage_'+gi2).addEventListener('change', function(){ buildGroupPicker(gi2); }); })(gi);
+      await buildGroupPicker(gi);
+    }
+  }
   document.getElementById('ctTamponFile').addEventListener('change', async function(e){
     var f = e.target.files[0]; if(!f) return;
     var raw = await new Promise(function(res){ var r = new FileReader(); r.onload = function(){ res(r.result); }; r.readAsDataURL(f); });
     tamponPng = await imageToPngDataUrl(raw);
     await saveTamponImage(tamponPng);
     document.getElementById('ctTamponPrev').innerHTML = '<img src="'+tamponPng+'" style="max-height:80px;">';
-    await refreshPicker();
+    await renderGroups();
   });
 
   async function refreshPickerReg(){
     var wrap = document.getElementById('pickRegWrap');
     if(!reglement || !document.getElementById('regJoindre').checked){ wrap.classList.add('hidden'); pickerReg = null; return; }
     wrap.classList.remove('hidden');
-    pickerReg = await buildPositionPicker(document.getElementById('pickReg'), reglement.data, null, [{ key:'salarie', label:'Salarié', color:'#A32638' }]);
+    pickerReg = await buildPositionPicker(document.getElementById('pickReg'), reglement.data, null, [{ key:'salarie', label:'Salarié', color:'#A32638' }], (layouts.reglement && layouts.reglement.pos) || {});
   }
   document.getElementById('regJoindre').addEventListener('change', refreshPickerReg);
   document.getElementById('regFile').addEventListener('change', async function(e){
@@ -1994,21 +2088,25 @@ async function renderAdminContrats(){
   document.getElementById('ctFiles').addEventListener('change', async function(e){
     var files = Array.from(e.target.files);
     document.getElementById('ctList').innerHTML = '<p class="muted">Analyse en cours…</p>';
-    contrats = [];
+    contrats = []; groups = [];
     for(var i=0;i<files.length;i++){
-      var f = files[i], match = null;
-      if(window.pdfjsLib){
-        var text = await extractPdfText(f);
-        if(text) match = findWorkerInText(text, workers);
-      }
-      if(!match){ var nn = normalize(f.name); match = workers.find(function(w){ return w.key && nn.indexOf(w.key) !== -1; }); }
-      contrats.push({ file: f, b64: await fileToBase64(f), match: match });
+      var f = files[i], text = '';
+      if(window.pdfjsLib){ text = await extractPdfText(f); }
+      var m = matchWorkerSmart(text, f.name, workers, nomsMap);
+      var b64 = await fileToBase64(f);
+      var fp = window.pdfjsLib ? await pdfFingerprint(b64) : '?|';
+      contrats.push({ file: f, b64: b64, match: m.worker, why: m.why, ambiguous: m.ambiguous, fp: fp });
     }
+    contrats.forEach(function(c, i){
+      var g = groups.find(function(x){ return x.fp === c.fp; });
+      if(!g){ g = { fp: c.fp, idxs: [], label: (layouts[c.fp] && layouts[c.fp].label) || ('Modèle : ' + c.file.name.replace(/\.pdf$/i,'')), picker: null }; groups.push(g); }
+      g.idxs.push(i);
+    });
     document.getElementById('ctList').innerHTML = contrats.map(function(c,i){
       var opts = optionsHtml.replace('value="'+(c.match?c.match.id:'__none__')+'"', 'value="'+(c.match?c.match.id:'')+'" selected');
-      return '<div class="doc-item" style="align-items:center;"><span style="flex:1;">'+c.file.name+'</span><select data-ctidx="'+i+'" style="max-width:140px;padding:8px;border-radius:8px;border:1px solid var(--line);">'+opts+'</select></div>';
+      return '<div class="doc-item" style="align-items:center;"><span style="flex:1;">'+c.file.name+(c.match?'<br><span class="muted" style="font-size:12px;">reconnu : '+c.match.prenom+' ('+c.why.join(' + ')+')</span>':(c.ambiguous&&c.ambiguous.length?'<br><span style="font-size:12px;color:var(--red);">plusieurs possibles ('+c.ambiguous.join(', ')+') — à choisir</span>':'<br><span style="font-size:12px;color:var(--red);">non reconnu — à choisir</span>'))+'</span><select data-ctidx="'+i+'" style="max-width:140px;padding:8px;border-radius:8px;border:1px solid var(--line);">'+opts+'</select></div>';
     }).join('');
-    await refreshPicker();
+    await renderGroups();
   });
 
   async function loadSuivi(){
@@ -2043,32 +2141,44 @@ async function renderAdminContrats(){
   document.getElementById('btnSignDeposer').onclick = async function(){
     var selects = document.querySelectorAll('select[data-ctidx]');
     var assigned = [];
-    selects.forEach(function(s){ if(s.value) assigned.push({ c: contrats[parseInt(s.getAttribute('data-ctidx'),10)], wid: s.value }); });
+    selects.forEach(function(s){ if(s.value) assigned.push({ ci: parseInt(s.getAttribute('data-ctidx'),10), wid: s.value }); });
     if(!assigned.length){ alert('Importez au moins un document et rattachez-le à un salarié.'); return; }
     if(!window.PDFLib){ alert('Bibliothèque PDF non chargée, rechargez la page.'); return; }
-    if(pad.isEmpty()){ alert('Dessinez d\'abord votre signature.'); return; }
-    var posC = picker && picker.positions;
-    if(!posC || !posC.employeur){ alert('Cliquez sur l\'aperçu du document pour placer la signature Employeur.'); return; }
-    if(tamponPng && !posC.tampon){ alert('Cliquez sur l\'aperçu pour placer le tampon (choisissez « Tampon » au-dessus de l\'aperçu).'); return; }
+    var useSaved = !!savedSig && document.getElementById('ctUseSaved').checked;
+    if(!useSaved && pad.isEmpty()){ alert('Dessinez d\'abord votre signature.'); return; }
+    // emplacements de chaque modèle utilisé
+    var usedGroups = [];
+    for(var k=0;k<assigned.length;k++){
+      var gi = groups.findIndex(function(g){ return g.idxs.indexOf(assigned[k].ci) !== -1; });
+      assigned[k].gi = gi;
+      if(usedGroups.indexOf(gi) === -1) usedGroups.push(gi);
+    }
+    for(var u=0;u<usedGroups.length;u++){
+      var g = groups[usedGroups[u]], pos = g.picker && g.picker.positions;
+      if(!pos || !pos.employeur){ alert('« '+document.getElementById('grpLabel_'+usedGroups[u]).value+' » : cliquez sur l\'aperçu pour placer la signature Employeur.'); return; }
+      if(tamponPng && !pos.tampon){ alert('« '+document.getElementById('grpLabel_'+usedGroups[u]).value+' » : placez aussi le tampon (choisissez « Tampon » au-dessus de l\'aperçu).'); return; }
+    }
     var joindre = !isFin && document.getElementById('regJoindre').checked && reglement;
     if(joindre && !(pickerReg && pickerReg.positions.salarie)){ alert('Placez la signature Salarié sur le règlement intérieur.'); return; }
     var dateStr = frDate(todayISO());
     var lieu = document.getElementById('ctLieu').value.trim();
-    if(!confirm('Apposer VOTRE signature, datée du '+dateStr+', sur '+assigned.length+' document(s) et les déposer chez les salariés concernés ?')) return;
+    if(!confirm('Apposer VOTRE signature'+(tamponPng?' et le tampon':'')+', datée du '+dateStr+', sur '+assigned.length+' document(s) et les déposer chez les salariés concernés ?')) return;
 
-    var sig = pad.toDataURL();
-    var pg = parseInt(document.getElementById('ctPage').value,10) || null;
+    var sig = useSaved ? savedSig : pad.toDataURL();
+    if(!useSaved && document.getElementById('ctRememberSig').checked){ setSavedSignature(sig); }
     var res = document.getElementById('ctResult');
     var ok = 0, errs = [];
     var lieuInfo = await getAgroData('employeur-info', {}); lieuInfo.lieu = lieu; await saveAgroData('employeur-info', lieuInfo);
     for(var i=0;i<assigned.length;i++){
-      var a = assigned[i];
+      var a = assigned[i], c = contrats[a.ci], grp = groups[a.gi];
+      var posC = grp.picker.positions;
+      var pg = parseInt(document.getElementById('grpPage_'+a.gi).value,10) || null;
       var w = workers.find(function(x){ return x.id === a.wid; });
       res.textContent = 'Signature '+(i+1)+'/'+assigned.length+' ('+(w?w.prenom:'')+')…';
       try{
-        var signed = await stampPdfBase64(a.c.b64, sig, posC.employeur, 'Fait à '+lieu+', le '+dateStr, pg, tamponPng ? { png: tamponPng, pos: posC.tampon } : null);
+        var signed = await stampPdfBase64(c.b64, sig, posC.employeur, 'Fait à '+lieu+', le '+dateStr, pg, tamponPng ? { png: tamponPng, pos: posC.tampon } : null);
         var docs = await getDocuments(a.wid);
-        docs.push({ id:'ct-'+Date.now()+'-'+i, name:docLabel.replace(/ /g,'')+'_'+(w?w.prenom:'')+'_'+a.c.file.name.replace(/\.pdf$/i,'')+'.pdf', type:'application/pdf', data:signed, uploadedAt:new Date().toISOString(), kind:kindDoc, aSigner:true, statut:'a_signer', signEmployeurLe:new Date().toISOString(), empPos: posC.salarie||null, signPage: pg });
+        docs.push({ id:'ct-'+Date.now()+'-'+i, name:docLabel.replace(/ /g,'')+'_'+(w?w.prenom:'')+'_'+c.file.name.replace(/\.pdf$/i,'')+'.pdf', type:'application/pdf', data:signed, uploadedAt:new Date().toISOString(), kind:kindDoc, aSigner:true, statut:'a_signer', signEmployeurLe:new Date().toISOString(), empPos: posC.salarie||null, signPage: pg });
         if(joindre && !docs.some(function(d){ return d.kind==='reglement'; })){
           docs.push({ id:'rg-'+Date.now()+'-'+i, name:'Reglement_interieur_'+(w?w.prenom:'')+'.pdf', type:'application/pdf', data:reglement.data, uploadedAt:new Date().toISOString(), kind:'reglement', aSigner:true, statut:'a_signer', empPos: pickerReg.positions.salarie, signPage:null });
         }
@@ -2076,7 +2186,14 @@ async function renderAdminContrats(){
         ok++;
       }catch(err){ errs.push((w?w.prenom:'?')+' : '+err.message); }
     }
-    res.textContent = ok+' document(s) signé(s) et déposé(s)'+(errs.length?' — erreurs : '+errs.join(' ; '):'')+'.';
+    // mémorise les emplacements par modèle
+    usedGroups.forEach(function(gi2){
+      var g2 = groups[gi2];
+      layouts[g2.fp] = { label: document.getElementById('grpLabel_'+gi2).value, pos: g2.picker.positions, page: parseInt(document.getElementById('grpPage_'+gi2).value,10) || null };
+    });
+    if(joindre && pickerReg) layouts.reglement = { pos: pickerReg.positions };
+    await saveAgroData('sign-layouts', layouts);
+    res.textContent = ok+' document(s) signé(s) et déposé(s)'+(errs.length?' — erreurs : '+errs.join(' ; '):'')+'. Emplacements mémorisés.';
     loadSuivi();
   };
 }
@@ -4417,6 +4534,15 @@ async function renderAdminPrimes(){
 
 async function exportExcel(allData, mods, monthFilter){
   var wb = XLSX.utils.book_new();
+  // Seuls les salariés ayant travaillé sur la période exportée apparaissent dans le fichier.
+  allData = allData.filter(function(d){
+    var h = 0;
+    Object.keys(d.entries||{}).forEach(function(day){
+      if(monthFilter && monthFilter!=='all' && day.slice(0,7)!==monthFilter) return;
+      var t = computeTotal(d.entries[day]); if(t) h += t;
+    });
+    return h > 0;
+  });
   var workers = allData.map(function(d){ return d.worker; });
   var primeMonth = (monthFilter && monthFilter!=='all') ? monthFilter : todayISO().slice(0,7);
   var primes = await computeAllWorkersMonthlyPrimes(workers, primeMonth);
@@ -4476,12 +4602,15 @@ async function exportExcel(allData, mods, monthFilter){
       rows.push([frDate(day), e.matinDebut||'', e.matinFin||'', e.apremDebut||'', e.apremFin||'', e.pause||0, computeTotal(e), edited, e.commentaire||'']);
     });
     var sheetName = d.worker.prenom.substring(0,28) || 'Salarié';
+    var baseName = sheetName, n = 2;
+    while(wb.SheetNames.indexOf(sheetName) !== -1){ sheetName = baseName.substring(0,26) + '_' + n; n++; }
     var ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   });
 
   var modRows = [['Prénom','Jour concerné','Ancien total','Nouveau total','Modifié le']];
-  (mods||[]).forEach(function(m){
+  var prenomsExportes = allData.map(function(d){ return d.worker.prenom; });
+  (mods||[]).filter(function(m){ return prenomsExportes.indexOf(m.prenom) !== -1; }).forEach(function(m){
     modRows.push([m.prenom, frDate(m.jour), m.ancienTotal, m.nouveauTotal, m.quand ? new Date(m.quand).toLocaleString('fr-FR') : '']);
   });
   var wsMods = XLSX.utils.aoa_to_sheet(modRows);
