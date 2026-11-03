@@ -7,6 +7,10 @@ function timeToDecimal(t){
   return parseInt(parts[0],10) + parseInt(parts[1],10)/60;
 }
 function computeTotal(e){
+  if((!e.matinDebut || !e.matinFin) && e.duree){
+    var dd = timeToDecimal(e.duree);
+    return (dd===null || isNaN(dd)) ? null : Math.round(dd*100)/100;
+  }
   if(!e.matinDebut || !e.matinFin) return null;
   var m = timeToDecimal(e.matinFin) - timeToDecimal(e.matinDebut);
   var a = 0;

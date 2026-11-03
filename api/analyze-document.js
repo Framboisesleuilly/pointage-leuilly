@@ -3,16 +3,20 @@ const PROMPTS = {
 
 Lis attentivement chaque ligne du tableau qui contient au moins une heure renseignée à la main.
 
+CAS IMPORTANT : certaines feuilles (cahier quadrillé, liste « Lundi 5 : 7H30 ») n'ont PAS d'heures de début et de fin, mais seulement UNE DURÉE par jour (ex. « 7H30 » = sept heures trente de travail dans la journée). Dans ce cas, ce n'est PAS une heure de début : mets cette valeur dans le champ "duree" (format "HH:MM", ex. "07:30") et laisse matinDebut, matinFin, apremDebut et apremFin à null.
+
 Réponds UNIQUEMENT avec un tableau JSON strict, rien d'autre : pas de texte avant, pas de texte après, pas d'explication, pas de balises markdown. Format exact :
 [
   {"jour": 1, "matinDebut": "07:30", "matinFin": "12:00", "apremDebut": "12:30", "apremFin": "14:00", "pauseMinutes": 0},
-  {"jour": 2, "matinDebut": "07:30", "matinFin": "12:00", "apremDebut": "12:30", "apremFin": "18:00", "pauseMinutes": 0}
+  {"jour": 2, "matinDebut": "07:30", "matinFin": "12:00", "apremDebut": "12:30", "apremFin": "18:00", "pauseMinutes": 0},
+  {"jour": 5, "matinDebut": null, "matinFin": null, "apremDebut": null, "apremFin": null, "pauseMinutes": 0, "duree": "07:30"}
 ]
 
 Règles :
 - "jour" est le numéro du jour du mois (1 à 31), tel qu'écrit dans la colonne Date.
 - Les heures sont au format "HH:MM" (24h). Si une case est vide ou barrée (tiret), mets null pour ce champ.
 - "pauseMinutes" est un nombre de minutes (0 si la case Pause est vide).
+- "duree" (optionnel) : uniquement quand la feuille ne donne qu'une durée par jour ; sinon omets le champ. Ne mets JAMAIS une durée dans matinDebut.
 - N'inclus pas les lignes totalement vides ou barrées (sans aucune heure).
 - Retranscris fidèlement ce qui est écrit à la main, du mieux que tu peux lire, même si l'écriture est imparfaite — fais une estimation raisonnable plutôt que de laisser passer une ligne lisible.
 - Ne réponds jamais par du texte d'excuse ou d'explication, uniquement le tableau JSON (même vide : [] si rien n'est lisible du tout).`,
