@@ -374,6 +374,10 @@ function cueilleurLabel(n){ return (parseInt(n,10)===0) ? 'Non identifié (sans 
 function timeToDecimal(t){ if(!t) return null; var parts = t.split(':'); return parseInt(parts[0],10) + parseInt(parts[1],10)/60; }
 
 function computeTotal(e){
+  if((!e.matinDebut || !e.matinFin) && e.duree){
+    var dd = timeToDecimal(e.duree);
+    return (dd===null || isNaN(dd)) ? null : round2(dd);
+  }
   if(!e.matinDebut || !e.matinFin) return null;
   var m = timeToDecimal(e.matinFin) - timeToDecimal(e.matinDebut);
   var a = 0;
@@ -518,7 +522,7 @@ async function renderWorkerDash(){
   var isToday = editDate === today;
   var lockedMonth = validations[editDate.slice(0,7)] || null;
   var current = entries[editDate] || {};
-  var alreadyFilled = current.matinDebut && current.matinFin;
+  var alreadyFilled = computeTotal(current) !== null;
   var wasEdited = current.history && current.history.length > 0;
 
   var html = '';
@@ -1234,6 +1238,7 @@ async function renderAdminWorkerDetail(){
         '<div><label>Après-midi fin</label><input type="time" id="aF" value="'+(current.apremFin||'')+'"></div>' +
       '</div>' +
       '<div><label>Pause (minutes)</label><input type="number" id="pause" min="0" step="5" value="'+(current.pause!==undefined?current.pause:15)+'"></div>' +
+      '<div><label>Ou durée du jour (si pas d\'horaires, ex. 07:30)</label><input type="time" id="duree" value="'+(current.duree||'')+'"></div>' +
       '<div><label>Commentaire (facultatif)</label><textarea id="commentaire" rows="2" style="width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:#FBFAF6;color:var(--ink);font-family:inherit;">'+(current.commentaire||'')+'</textarea></div>' +
       '<div class="total-line"><span>Total du jour</span><span class="val" id="liveTotal">—</span></div>' +
       '<button class="btn btn-gold" id="btnSave">Enregistrer la correction</button>' +
@@ -1391,12 +1396,13 @@ async function renderAdminWorkerDetail(){
       matinFin: document.getElementById('mF').value,
       apremDebut: document.getElementById('aD').value,
       apremFin: document.getElementById('aF').value,
-      pause: document.getElementById('pause').value
+      pause: document.getElementById('pause').value,
+      duree: document.getElementById('duree').value
     };
     var t = computeTotal(e);
     document.getElementById('liveTotal').textContent = t!==null ? t+' h' : '—';
   }
-  ['mD','mF','aD','aF','pause'].forEach(function(id){
+  ['mD','mF','aD','aF','pause','duree'].forEach(function(id){
     document.getElementById(id).addEventListener('input', updateLive);
   });
   updateLive();
@@ -1415,19 +1421,21 @@ async function renderAdminWorkerDetail(){
       apremDebut: document.getElementById('aD').value,
       apremFin: document.getElementById('aF').value,
       pause: document.getElementById('pause').value,
+      duree: document.getElementById('duree').value,
       commentaire: document.getElementById('commentaire').value
     };
-    if(!e.matinDebut || !e.matinFin){
-      alert('Renseigne au moins l\'heure de début et de fin du matin.');
+    if((!e.matinDebut || !e.matinFin) && !e.duree){
+      alert('Renseigne les horaires du matin (début et fin) ou la durée du jour.');
       return;
     }
     var now = new Date().toISOString();
     var existing = entries[editDate];
-    if(existing && (existing.matinDebut || existing.matinFin || existing.apremDebut || existing.apremFin)){
+    if(existing && (existing.matinDebut || existing.matinFin || existing.apremDebut || existing.apremFin || existing.duree)){
       var hist = existing.history || [];
       hist.push({
         matinDebut: existing.matinDebut||'', matinFin: existing.matinFin||'',
         apremDebut: existing.apremDebut||'', apremFin: existing.apremFin||'',
+        duree: existing.duree||'',
         pause: existing.pause!==undefined?existing.pause:'', total: computeTotal(existing),
         remplaceLe: now, modifiePar: 'Responsable'
       });
@@ -1935,14 +1943,30 @@ async function buildPositionPicker(host, b64, pageNum, markers, initial){
   return { positions: positions };
 }
 
-async function pdfFingerprint(b64){
+async function pdfSig(b64){
   try{
     var pdf = await pdfjsLib.getDocument({ data: base64ToBytes(b64) }).promise;
-    var pg = await pdf.getPage(1);
-    var tc = await pg.getTextContent();
-    var words = normalize(tc.items.map(function(i){ return i.str; }).join(' ')).replace(/[^a-z\s]/g,' ').split(/\s+/).filter(function(w){ return w.length >= 4; }).slice(0,6);
-    return pdf.numPages + '|' + words.join(' ');
-  }catch(e){ return '?|'; }
+    var pg = await pdf.getPage(1), tc = await pg.getTextContent();
+    var seen = {}, words = [];
+    normalize(tc.items.map(function(i){ return i.str; }).join(' ')).replace(/[^a-z\s]/g,' ').split(/\s+/).forEach(function(w){ if(w.length >= 4 && !seen[w]){ seen[w] = 1; words.push(w); } });
+    return { pages: pdf.numPages, words: words.slice(0,80) };
+  }catch(e){ return { pages: 0, words: [] }; }
+}
+function sigSimilarity(a, b){
+  if(a.pages !== b.pages) return 0;
+  if(!a.words.length || !b.words.length) return (a.words.length === b.words.length) ? 1 : 0;
+  var set = {}; a.words.forEach(function(w){ set[w] = 1; });
+  var inter = 0; b.words.forEach(function(w){ if(set[w]) inter++; });
+  return inter / (a.words.length + b.words.length - inter);
+}
+function findLayout(layouts, sig){
+  var best = null, bestS = 0;
+  Object.keys(layouts).forEach(function(k){
+    var l = layouts[k]; if(!l || !l.words) return;
+    var s = sigSimilarity(sig, { pages: l.pages, words: l.words });
+    if(s >= 0.6 && s > bestS){ bestS = s; best = k; }
+  });
+  return best;
 }
 function getSavedSignature(){ try{ return localStorage.getItem('sigImageEmployeur') || null; }catch(e){ return null; } }
 function setSavedSignature(v){ try{ if(v) localStorage.setItem('sigImageEmployeur', v); else localStorage.removeItem('sigImageEmployeur'); }catch(e){} }
@@ -2040,14 +2064,14 @@ async function renderAdminContrats(){
   async function buildGroupPicker(gi){
     var g = groups[gi];
     var pg = parseInt(document.getElementById('grpPage_'+gi).value,10) || null;
-    var initial = g.picker ? g.picker.positions : ((layouts[g.fp] && layouts[g.fp].pos) || {});
+    var initial = g.picker ? g.picker.positions : ((g.lk && layouts[g.lk] && layouts[g.lk].pos) || {});
     g.picker = await buildPositionPicker(document.getElementById('pickGrp_'+gi), contrats[g.idxs[0]].b64, pg, markersList(), initial);
   }
   async function renderGroups(){
     var host = document.getElementById('ctGroups');
     if(!groups.length){ return; }
     host.innerHTML = groups.map(function(g, gi){
-      var saved = layouts[g.fp];
+      var saved = g.lk ? layouts[g.lk] : null;
       return '<div class="card stack">' +
         '<div><label>Modèle de document ('+g.idxs.length+' fichier(s))</label><input id="grpLabel_'+gi+'" value="'+(g.label||'').replace(/"/g,'&quot;')+'"></div>' +
         '<div style="font-size:13px;color:'+(saved?'var(--moss)':'var(--red)')+';">'+(saved?'✓ emplacement mémorisé pour ce modèle — vérifiez l\'aperçu':'Emplacement à placer (sera mémorisé)')+'</div>' +
@@ -2094,12 +2118,12 @@ async function renderAdminContrats(){
       if(window.pdfjsLib){ text = await extractPdfText(f); }
       var m = matchWorkerSmart(text, f.name, workers, nomsMap);
       var b64 = await fileToBase64(f);
-      var fp = window.pdfjsLib ? await pdfFingerprint(b64) : '?|';
-      contrats.push({ file: f, b64: b64, match: m.worker, why: m.why, ambiguous: m.ambiguous, fp: fp });
+      var sg = window.pdfjsLib ? await pdfSig(b64) : { pages:0, words:[] };
+      contrats.push({ file: f, b64: b64, match: m.worker, why: m.why, ambiguous: m.ambiguous, sig: sg });
     }
     contrats.forEach(function(c, i){
-      var g = groups.find(function(x){ return x.fp === c.fp; });
-      if(!g){ g = { fp: c.fp, idxs: [], label: (layouts[c.fp] && layouts[c.fp].label) || ('Modèle : ' + c.file.name.replace(/\.pdf$/i,'')), picker: null }; groups.push(g); }
+      var g = groups.find(function(x){ return sigSimilarity(x.sig, c.sig) >= 0.6; });
+      if(!g){ var lk = findLayout(layouts, c.sig); g = { sig: c.sig, lk: lk, idxs: [], label: (lk && layouts[lk].label) || ('Modèle : ' + c.file.name.replace(/\.pdf$/i,'')), picker: null }; groups.push(g); }
       g.idxs.push(i);
     });
     document.getElementById('ctList').innerHTML = contrats.map(function(c,i){
@@ -2189,7 +2213,8 @@ async function renderAdminContrats(){
     // mémorise les emplacements par modèle
     usedGroups.forEach(function(gi2){
       var g2 = groups[gi2];
-      layouts[g2.fp] = { label: document.getElementById('grpLabel_'+gi2).value, pos: g2.picker.positions, page: parseInt(document.getElementById('grpPage_'+gi2).value,10) || null };
+      var key2 = g2.lk || ('m'+Date.now()+'_'+gi2);
+      layouts[key2] = { label: document.getElementById('grpLabel_'+gi2).value, pos: g2.picker.positions, page: parseInt(document.getElementById('grpPage_'+gi2).value,10) || null, pages: g2.sig.pages, words: g2.sig.words };
     });
     if(joindre && pickerReg) layouts.reglement = { pos: pickerReg.positions };
     await saveAgroData('sign-layouts', layouts);
@@ -2674,6 +2699,12 @@ async function renderAdminImportHours(){
       var data = await r.json();
       if(!r.ok || data.error){ resultEl.textContent = 'Erreur : ' + (data.error||'inconnue'); return; }
       var jours = data.resultats || [];
+      jours.forEach(function(j){
+        if(j.duree){
+          var mm = String(j.duree).trim().match(/^(\d{1,2})\s*[:hH]\s*(\d{0,2})$/);
+          j.duree = mm ? String(mm[1]).padStart(2,'0')+':'+String(mm[2]||'0').padStart(2,'0') : '';
+        }
+      });
       if(!jours.length){ resultEl.textContent = 'Aucun jour détecté sur la photo.'; return; }
       resultEl.textContent = jours.length + ' jour(s) détecté(s) — vérifie ci-dessous avant de confirmer.';
       renderPhotoReview(jours, workerId, monthVal);
@@ -2700,6 +2731,8 @@ async function renderAdminImportHours(){
           '<input type="time" data-f="apremFin" data-idx="'+idx+'" value="'+(j.apremFin||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;">' +
         '</div>' +
         '<input type="number" data-f="pauseMinutes" data-idx="'+idx+'" value="'+(j.pauseMinutes||0)+'" placeholder="Pause (min)" style="margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:8px;width:100%;">' +
+        '<div style="margin-top:6px;"><label style="margin-bottom:4px;">Durée du jour (si la feuille n\'indique qu\'une durée, ex. 7H30)</label>' +
+        '<input type="time" data-f="duree" data-idx="'+idx+'" value="'+(j.duree||'')+'" style="padding:8px;border:1px solid var(--line);border-radius:8px;width:100%;"></div>' +
       '</div>';
     });
     html += '</div><button class="btn btn-gold" id="btnConfirmPhotoImport">Confirmer et importer ces '+jours.length+' jour(s)</button><div id="phConfirmResult" class="muted"></div>';
@@ -2719,12 +2752,14 @@ async function renderAdminImportHours(){
       var entries = await getEntries(targetWorkerId);
       var count = 0;
       jours.forEach(function(j){
-        if(!j.matinDebut || !j.matinFin) return;
+        var aDesHoraires = j.matinDebut && j.matinFin;
+        if(!aDesHoraires && !j.duree) return;
         var dateStr = yearMonth[0]+'-'+yearMonth[1]+'-'+String(j.jour).padStart(2,'0');
         entries[dateStr] = {
-          matinDebut: j.matinDebut, matinFin: j.matinFin,
-          apremDebut: j.apremDebut||'', apremFin: j.apremFin||'',
-          pause: j.pauseMinutes||0,
+          matinDebut: aDesHoraires ? j.matinDebut : '', matinFin: aDesHoraires ? j.matinFin : '',
+          apremDebut: aDesHoraires ? (j.apremDebut||'') : '', apremFin: aDesHoraires ? (j.apremFin||'') : '',
+          pause: aDesHoraires ? (j.pauseMinutes||0) : 0,
+          duree: aDesHoraires ? '' : j.duree,
           importeLe: new Date().toISOString(), importeDePhoto: true
         };
         count++;
