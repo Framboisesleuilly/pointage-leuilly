@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>Pointage — Mont de Leuilly</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pointage">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#33502E">
 <style>
   :root{
     --moss:#33502E;
@@ -210,7 +216,35 @@ async function getSorters(){
 async function saveSorters(list){
   await fetch('/api/sorters', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list)});
 }
+// Dans l'appli mobile (Capacitor), les téléchargements classiques ne marchent pas : on écrit le fichier puis on ouvre le partage (Enregistrer / Drive / Mail…).
+function isNativeApp(){
+  try{ return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }catch(e){ return false; }
+}
+async function saveFileNative(base64, filename){
+  var P = window.Capacitor && window.Capacitor.Plugins;
+  if(!P || !P.Filesystem || !P.Share) return false;
+  try{
+    var r = await P.Filesystem.writeFile({ path: filename, data: base64, directory: 'CACHE', recursive: true });
+    await P.Share.share({ title: filename, url: r.uri, dialogTitle: 'Enregistrer ou partager' });
+    return true;
+  }catch(err){
+    if(err && /cancel/i.test(String(err.message||err))) return true; // partage annulé par l'utilisateur
+    return false;
+  }
+}
+function saveWorkbook(wb, filename){
+  if(isNativeApp()){
+    var b64 = XLSX.write(wb, { type:'base64', bookType:'xlsx' });
+    saveFileNative(b64, filename).then(function(ok){ if(!ok) alert('Impossible d\'enregistrer le fichier dans l\'appli.'); });
+    return;
+  }
+  XLSX.writeFile(wb, filename);
+}
 function downloadBase64File(base64, mimeType, filename){
+  if(isNativeApp()){
+    saveFileNative(base64, filename || 'document').then(function(ok){ if(!ok) alert('Impossible d\'enregistrer le fichier dans l\'appli.'); });
+    return;
+  }
   try{
     var byteChars = atob(base64);
     var byteNumbers = new Array(byteChars.length);
@@ -239,6 +273,11 @@ async function downloadDocsZip(entries, zipName){
     if(used[path]){ used[path]++; path = (e.folder ? e.folder+'/' : '') + used[path] + '_' + e.name; } else { used[path] = 1; }
     zip.file(path, e.data, { base64: true });
   });
+  if(isNativeApp()){
+    var zb64 = await zip.generateAsync({ type:'base64' });
+    if(!(await saveFileNative(zb64, zipName))) alert('Impossible d\'enregistrer le fichier dans l\'appli.');
+    return;
+  }
   var blob = await zip.generateAsync({ type:'blob' });
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a'); a.href = url; a.download = zipName;
@@ -2364,7 +2403,7 @@ async function renderAdminPayroll(){
     data.push(['TOTAL','','','', totalNet, totalAcomptes, round2(totalNet-totalAcomptes), totalCot]);
     var ws = XLSX.utils.aoa_to_sheet(data);
     XLSX.utils.book_append_sheet(wb, ws, 'Virements');
-    XLSX.writeFile(wb, 'Virements_'+todayISO()+'.xlsx');
+    saveWorkbook(wb, 'Virements_'+todayISO()+'.xlsx');
   };
 }
 
@@ -2582,7 +2621,7 @@ async function renderAdminBarquettes(){
     var wsDetail = XLSX.utils.aoa_to_sheet(detail);
     XLSX.utils.book_append_sheet(wb, wsDetail, 'Détail');
 
-    XLSX.writeFile(wb, 'Barquettes_'+date+'.xlsx');
+    saveWorkbook(wb, 'Barquettes_'+date+'.xlsx');
   };
 
   document.getElementById('btnRepairIndex').onclick = async function(){
@@ -3736,7 +3775,7 @@ async function renderAdminVentesOutils(){
       XLSX.utils.book_append_sheet(wb, wsYears, 'Comparatif années');
     }
 
-    XLSX.writeFile(wb, 'Ventes_'+todayISO()+'.xlsx');
+    saveWorkbook(wb, 'Ventes_'+todayISO()+'.xlsx');
   };
 }
 
@@ -4254,7 +4293,7 @@ async function renderAdminRythmePeriode(){
       }
       var ws = XLSX.utils.aoa_to_sheet(rowsOut);
       XLSX.utils.book_append_sheet(wb, ws, 'Rythme journalier');
-      XLSX.writeFile(wb, 'Rythme_journalier_'+fromVal+'_au_'+toVal+'.xlsx');
+      saveWorkbook(wb, 'Rythme_journalier_'+fromVal+'_au_'+toVal+'.xlsx');
     };
   }
 
@@ -4423,7 +4462,7 @@ async function renderAdminRythme(){
     rows.push(['Rendement au pied général', '', '', '', '', '', '', totalKgToday+' kg / '+totalPlants+' plants', rendementPied!==null?rendementPied+' kg/plant':'']);
     var ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Rythme cueillette');
-    XLSX.writeFile(wb, 'Rythme_cueillette_'+date+'.xlsx');
+    saveWorkbook(wb, 'Rythme_cueillette_'+date+'.xlsx');
   };
 
   var exportSemaineBtn = document.getElementById('btnExportSemaine');
@@ -4477,7 +4516,7 @@ async function renderAdminRythme(){
     var wbSemaine = XLSX.utils.book_new();
     var wsSemaine = XLSX.utils.aoa_to_sheet(rowsOut);
     XLSX.utils.book_append_sheet(wbSemaine, wsSemaine, 'Rythme semaine');
-    XLSX.writeFile(wbSemaine, 'Rythme_semaine_'+weekDates[0]+'.xlsx');
+    saveWorkbook(wbSemaine, 'Rythme_semaine_'+weekDates[0]+'.xlsx');
     exportSemaineBtn.textContent = 'Exporter la semaine (kg/h par jour)';
   };
 }
@@ -4563,7 +4602,7 @@ async function renderAdminPrimes(){
     var wsDetail = XLSX.utils.aoa_to_sheet(detailRows);
     XLSX.utils.book_append_sheet(wb, wsDetail, 'Détail quotidien');
 
-    XLSX.writeFile(wb, 'Primes_'+month+'.xlsx');
+    saveWorkbook(wb, 'Primes_'+month+'.xlsx');
   };
 }
 
@@ -4652,7 +4691,7 @@ async function exportExcel(allData, mods, monthFilter){
   XLSX.utils.book_append_sheet(wb, wsMods, 'Modifications');
 
   var today = todayISO();
-  XLSX.writeFile(wb, 'Pointage_'+today+'.xlsx');
+  saveWorkbook(wb, 'Pointage_'+today+'.xlsx');
 }
 
 btnQuit.onclick = function(){ state = { screen:'home', worker:null, sorter:null, editDate:null, adminWorkerId:null, adminEditDate:null, expandedMonth:null, sorterDate:null, adminBarqDate:null, sorterEditIdx:null, adminMonthFilter:null, parcelleDate:null, parcelleEditSecteur:null, agroVueGroupBy:'secteur', agroVueDays:30, rythmeDate:null, rythmeSortBy:'kg', venteCalMonth:null, venteYearFilter:'all', primesMonth:null, primesExpanded:null, rythmePeriodeFrom:null, rythmePeriodeTo:null, tachesFiltre:'actives', acompteMonth:null, attestationWorkerId:null, signDocId:null, docsMode:null }; render(); };
